@@ -158,8 +158,59 @@ jobs:
       - name: check size (G1)
         run: bash scripts/check-size.sh
 
-  # 官网部署已拆分至 .github/workflows/deploy-site.yml（2026-10-28：Pages 服务
-  # 状态异常时 pages job 会把整个 pipeline 拖成 startup_failure，独立 workflow 隔离故障域）。
+  # ---- 官网部署（M4 Task P3：site/ → GitHub Pages）----
+  #
+  # 触发：workflow_dispatch（手动）或 push 到 main 且**本次变更触达 site/**——
+  # 用 git diff --name-only <before> <sha> 在 job 内判定（workflow 级 paths 过滤会
+  # 影响整个 CI 的触发，不能用）；before 缺失（新分支首个 push）/ 不可解析时按
+  # 「有变更」处理（宁多部署一次，绝不漏部署）。
+  #
+  # artifact = site/ 目录本身（纯静态、无构建——见 site/README.md 的「无框架无构建」口径）。
+  # 前置（一次性，仓库管理员）：Settings → Pages → Source 选 GitHub Actions，
+  # 否则 deploy-pages 报错。
+  pages:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        # fetch-depth: 0 —— push 变更检测要能解析 github.event.before（可能不是 HEAD~1，
+        # 一次推多个 commit 时浅克隆取不到该对象 → 误判为「有变更」多部署一次可接受，
+        # 这里干脆全量取，保证判定准确）。
+        with:
+          fetch-depth: 0
+      - name: Detect site/ changes (push only)
+        id: gate
+        if: github.event_name == 'push'
+        run: |
+          before="${{ github.event.before }}"
+          if [ -z "$before" ] || [[ "$before" =~ ^0+$ ]] || ! git cat-file -e "$before" 2>/dev/null; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$before" "$GITHUB_SHA" | grep -q '^site/'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Configure Pages
+        if: steps.gate.outputs.changed != 'false'
+        uses: actions/configure-pages@v5
+      - name: Upload site artifact
+        if: steps.gate.outputs.changed != 'false'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - name: Deploy to GitHub Pages
+        id: deployment
+        if: steps.gate.outputs.changed != 'false'
+        uses: actions/deploy-pages@v4
+
   # ---- 发布流水线（plan D6，0.3.0 起 macOS-only）----
   #
   # 控制器前置条件（首次 tag 推送前必须完成，缺一签名步骤即硬失败——有意为之，
