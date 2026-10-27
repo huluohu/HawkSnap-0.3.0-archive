@@ -20,6 +20,12 @@ workspace = true
 # keycast-focus-probe 探针 bin（及其 #[ignore] 集成测试）。
 [features]
 probe-util = []
+# M4 P1：Native Messaging 宿主二进制（Chrome 拉起的独立小进程）。
+# feature 门控：**不进默认构建**——M3 N4 教训：包内出现第二个「默认 bin 候选」会让
+# `tauri build` / `tauri dev` 找错主程序（default-run 已定 hawksnap，但为免歧义
+# 仍把宿主挂在 required-features 下）。构建：
+#   cargo build --release --features native-host --bin hawksnap-host
+native-host = []
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -99,3 +105,10 @@ path = "src/main.rs"
 name = "keycast-focus-probe"
 path = "src/bin/keycast-focus-probe.rs"
 required-features = ["probe-util"]
+
+# M4 P1：Native Messaging 宿主（Chrome 按 manifest 拉起 → stdio JSON 帧 →
+# 转发给运行中的桌面端）。与探针同款门控：不进默认构建，不参与主程序解析。
+[[bin]]
+name = "hawksnap-host"
+path = "src/bin/hawksnap-host.rs"
+required-features = ["native-host"]

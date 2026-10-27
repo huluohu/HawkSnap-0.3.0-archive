@@ -120,5 +120,14 @@
   "scrollshot.bar.finish": "Finish",
   "scrollshot.bar.finishOnly": "Finish (⌘S unavailable)",
   "scrollshot.bar.hintNoHotkey": "Scroll the page… click Finish to finish",
-  "scrollshot.bar.abort": "Discard"
+  "scrollshot.bar.abort": "Discard",
+  "banner.browserCapture": "Browser capture received: {path}",
+  "plugin.title": "Browser extension",
+  "plugin.statusLabel": "Connection status",
+  "plugin.status.ready": "Ready",
+  "plugin.status.stopped": "Not running",
+  "plugin.status.unknown": "Checking…",
+  "plugin.extIdLabel": "Extension ID",
+  "plugin.extIdPlaceholder": "<extension ID>",
+  "plugin.installHint": "Setup: run scripts/install-native-host.sh to register the host, then put the extension ID into the manifest's allowed_origins."
 }

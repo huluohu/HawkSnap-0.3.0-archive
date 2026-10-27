@@ -19,6 +19,8 @@ mod gif;
 mod history;
 mod idle_reaper;
 mod keycast;
+mod native_protocol;
+pub mod native_messaging;
 mod ocr;
 mod overlay;
 mod panel;
@@ -127,7 +129,8 @@ pub fn run() {
             scrollshot::scrollshot_start, scrollshot::scrollshot_stop, scrollshot::scrollshot_status,
             scrollshot::scrollshot_abort,
             keycast::keycast_set,
-            updater::check_for_updates, updater::install_update, updater::restart_app
+            updater::check_for_updates, updater::install_update, updater::restart_app,
+            native_messaging::native_messaging_status, native_messaging::native_ingest
         ])
         .setup(|app| {
             // 单实例守卫（Task 13）：setup 第一步。锁文件在临时目录，flock 独占；
@@ -165,6 +168,14 @@ pub fn run() {
             // 见 commands::allow_asset_scope 注）。启动按当前 settings 放行一次；
             // save_dir 变更路径在 set_settings 成功后补放行。
             crate::commands::allow_asset_scope(app.handle());
+
+            // M4 P1：Native Messaging 回环监听（浏览器插件 → 桌面端）。
+            // 监听 127.0.0.1:<端口>，端口与一次性令牌写入 0600 宿主配置文件
+            // （Chrome 拉起的 hawksnap-host 读它转发帧）。**失败不阻塞启动**
+            // （旁路功能，裁定同历史库初始化）：插件链路不可用，其余功能照常。
+            if let Err(e) = crate::native_messaging::start_listener(app.handle().clone()) {
+                eprintln!("[hawksnap] Native Messaging 监听启动失败: {e}");
+            }
 
             // 热键注册失败不中止启动（spec §9：允许无热键启动，但必须给用户可见反馈）。
             if let Err(err) = overlay::register_hotkeys(app.handle()) {

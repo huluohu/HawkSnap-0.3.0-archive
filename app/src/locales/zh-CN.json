@@ -120,5 +120,14 @@
   "scrollshot.bar.finish": "完成",
   "scrollshot.bar.finishOnly": "完成（⌘S 不可用）",
   "scrollshot.bar.hintNoHotkey": "滚动页面…完成后点「完成」",
-  "scrollshot.bar.abort": "放弃"
+  "scrollshot.bar.abort": "放弃",
+  "banner.browserCapture": "已接收浏览器截图：{path}",
+  "plugin.title": "浏览器插件",
+  "plugin.statusLabel": "连接状态",
+  "plugin.status.ready": "已就绪",
+  "plugin.status.stopped": "未运行",
+  "plugin.status.unknown": "检测中…",
+  "plugin.extIdLabel": "扩展 ID",
+  "plugin.extIdPlaceholder": "<填入扩展 ID>",
+  "plugin.installHint": "安装：先运行 scripts/install-native-host.sh 注册宿主，再把扩展 ID 填入插件清单的 allowed_origins。"
 }

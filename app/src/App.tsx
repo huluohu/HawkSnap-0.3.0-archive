@@ -131,6 +131,10 @@ function App() {
   const [saveOk, setSaveOk] = useState(false);
   const [updateState, setUpdateState] = useState<UpdateState>({ phase: "idle" });
   const [updateError, setUpdateError] = useState<string | null>(null);
+  // —— 浏览器插件分区（M4 P1）—— Native Messaging 桥是否就绪（后端监听状态）+
+  // 浏览器截图入库后的提示横幅。
+  const [nativeReady, setNativeReady] = useState<boolean | null>(null);
+  const [browserCapture, setBrowserCapture] = useState<string | null>(null);
   // —— 历史分区（M0）—— 懒加载：挂载即 history_list(50)（面板打开时填充）；输入
   // 经 250ms 防抖切换到 history_search（计划接口）。确认删除是瓦片内两步按钮
   // （[删除]→[确认删除]，避免原生 dialog 管线）。
@@ -186,6 +190,49 @@ function App() {
     let unlisten: (() => void) | undefined;
     let disposed = false;
     listen<string>("hawk://record-error", (e) => setRecordError(e.payload))
+      .then((un) => {
+        if (disposed) un();
+        else unlisten = un;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // 浏览器插件分区（M4 P1）：Native Messaging 桥状态 + 浏览器截图回流横幅。
+  // 状态轮询（5s）——监听是后台线程启停的，命令读的是进程内标志位。
+  useEffect(() => {
+    let disposed = false;
+    const poll = () => {
+      invoke<boolean>("native_messaging_status")
+        .then((ok) => {
+          if (!disposed) setNativeReady(ok);
+        })
+        .catch(() => {
+          if (!disposed) setNativeReady(false);
+        });
+    };
+    poll();
+    const timer = window.setInterval(poll, 5000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  // 浏览器截图入库（后端落盘 + 入库后推事件）→ 横幅告知用户「收到了」。
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    listen<{ path: string; width: number; height: number }>(
+      "hawk://browser-capture",
+      (e) => {
+        if (disposed) return;
+        setBrowserCapture(e.payload.path);
+      },
+    )
       .then((un) => {
         if (disposed) un();
         else unlisten = un;
@@ -417,6 +464,11 @@ function App() {
       {updateError && (
         <div role="alert" style={banner}>
           {updateError}
+        </div>
+      )}
+      {browserCapture && (
+        <div role="status" style={infoBanner}>
+          {t("banner.browserCapture", { path: browserCapture })}
         </div>
       )}
       <h1>HawkSnap</h1>
@@ -716,6 +768,28 @@ function App() {
           {saveOk && <span style={{ color: "#3c763d" }}>{t("settings.saved")}</span>}
         </div>
       </section>
+
+      {/* —— 浏览器插件分区（M4 P1：Native Messaging 桥）——
+          只展示状态与扩展 ID 占位（注册动作在宿主侧：scripts/install-native-host.sh）。
+          状态来自 native_messaging_status（后端监听是否在跑）。 */}
+      <section style={settingsSection}>
+        <h2 style={{ fontSize: 16, margin: "0 0 12px" }}>{t("plugin.title")}</h2>
+        <div style={fieldRow}>
+          <span style={fieldLabel}>{t("plugin.statusLabel")}</span>
+          <span>
+            {nativeReady === null
+              ? t("plugin.status.unknown")
+              : nativeReady
+                ? t("plugin.status.ready")
+                : t("plugin.status.stopped")}
+          </span>
+        </div>
+        <div style={fieldRow}>
+          <span style={fieldLabel}>{t("plugin.extIdLabel")}</span>
+          <code style={{ fontSize: 13 }}>{t("plugin.extIdPlaceholder")}</code>
+        </div>
+        <p style={{ color: "#666", fontSize: 13, margin: 0 }}>{t("plugin.installHint")}</p>
+      </section>
     </main>
   );
 }
@@ -762,6 +836,17 @@ const historyBanner: CSSProperties = {
   background: "#fdecea",
   color: "#a94442",
   fontSize: 13,
+};
+
+// 提示型横幅（浏览器截图入库等「非错误」信息）——绿色描边，与错误横幅区分。
+const infoBanner: CSSProperties = {
+  margin: "12px",
+  padding: "10px 14px",
+  border: "1px solid #3c763d",
+  borderRadius: 6,
+  background: "#eaf6ea",
+  color: "#2b5e2c",
+  fontSize: 14,
 };
 
 const grid: CSSProperties = {

@@ -59,7 +59,9 @@ CREATE TRIGGER IF NOT EXISTS shots_fts_au AFTER UPDATE ON shots BEGIN
 END;";
 
 /// history.db 落点（app_data_dir()/history.db）。
-fn db_path(app: &AppHandle) -> std::path::PathBuf {
+/// pub(crate)：M4 P1 的 native_messaging 用同一路径入库（浏览器截图），
+/// 免得再包一层 AppHandle 间接层。
+pub(crate) fn db_path(app: &AppHandle) -> std::path::PathBuf {
     app.path()
         .app_data_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
