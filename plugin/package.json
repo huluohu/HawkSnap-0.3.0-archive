@@ -1,9 +1,9 @@
 {
   "name": "hawksnap-plugin",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "HawkSnap browser extension (MV3): full-page / visible / region capture, annotation, optional send-to-desktop via Native Messaging.",
-  "license": "AGPL-3.0-only",
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "engines": {
     "node": ">=18"

@@ -8,7 +8,8 @@ TypeScript + esbuild，**零运行时依赖**（唯一 devDependency：esbuild�
 
 ```bash
 cd plugin
-npm ci          # 或 npm install（仅 esbuild 一个 devDep）
+npm install     # 仓库未提交 package-lock.json（仅 esbuild 一个 devDep），故用 install；
+                # 待 lockfile 首次生成并提交后改回 npm ci
 npm run build   # 产物 → plugin/dist（已 gitignore）
 npm test        # 纯逻辑单测（node:test，远端 Linux 农场跑）
 ```

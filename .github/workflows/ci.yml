@@ -105,6 +105,26 @@ jobs:
       # G6 门（plan D2）：i18n key 覆盖率（A⊆Z、A⊆E、Z==E），违例 exit 1。
       - run: npm run check:i18n
 
+  # ---- 浏览器插件（M4 P2：MV3 扩展，构建 + 纯逻辑单测）----
+  #
+  # 注意：仓库**尚未提交 plugin/package-lock.json**（插件仅 esbuild 一个 devDep，
+  # 首跑 npm install 生成后应提交入库），故这里用 `npm install` 而非 `npm ci`——
+  # `npm ci` 在无 lockfile 时硬失败。**lockfile 提交后，把下方 npm install 改回
+  # npm ci**（与 frontend 腿同口径，享受缓存与可复现安装）。
+  plugin-test:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: plugin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install   # TODO: lockfile 提交后改为 npm ci
+      - run: npm test
+      - run: npm run build
+
   size:
     # G1 体积断言（≤15MB dmg，plan D2 落地、D6 起为正式门）。tauri build 慢是预期；
     # continue-on-error: false——此 job 即 G1 断言本体，红 = 不达标，不允许静默。

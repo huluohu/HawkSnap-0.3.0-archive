@@ -31,6 +31,9 @@ else
 fi
 
 # ---------- (b) 版本 1.0.0 五处一致 ----------
+# 注意：本检查**不覆盖** plugin/manifest.json 与 plugin/package.json 的 "version"
+# （终审修复轮 F2 已手改为 1.0.0 与产品对齐，但门脚本未纳入 grep 站点）——
+# 若将来升版本，这两处需人工同步，或把它们加进 check_grep 清单。
 echo
 echo "(b) 版本一致性（期望 1.0.0，5 处 + Cargo.lock 的 4 个 workspace crate）"
 check_grep() { # file pattern label

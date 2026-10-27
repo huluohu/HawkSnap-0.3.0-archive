@@ -54,7 +54,7 @@ plugin/dist 已 gitignore、LICENSE-THIRD-PARTY.md 声明 gifski（AGPL 触发�
 | 10 | **F9 摄像头画中画**手工验证：录屏中开启 PiP，检查成片时间线连续（无冻结 / 跳变），相机缺席时录制不受影响 | 时间线连续 | M3 F9 |
 | 11 | **F10 长截图**手工滚动验证：多页面滚动拼接，周期内容应被拒绝而非产出重影 | 拼接正确 / 拒绝有提示 | M3 F10 |
 | 12 | **keycast 焦点检查**：录制中开启按键显示，确认 CGEventTap 只读旁路**不吞按键**、修饰键单按不显示、F6 停止照常触发 | 行为符合 M3 规格 | M3 keycast |
-| 13 | 浏览器插件冒烟：`cd plugin && npm ci && npm test`（远端 Linux 农场或本机 node）→ Chrome `chrome://extensions` 加载 `plugin/dist` → 整页 / 可见区 / 区域截图 → 标注 → 复制 / 下载 → 注册宿主后「发送到 HawkSnap」入历史 | 全链路可用 | M4 P2 |
+| 13 | 浏览器插件冒烟：`cd plugin && npm install && npm test`（仓库未提交 plugin/package-lock.json，故用 install；lockfile 首跑生成后建议提交并改回 `npm ci`）（远端 Linux 农场或本机 node）→ Chrome `chrome://extensions` 加载 `plugin/dist` → 整页 / 可见区 / 区域截图 → 标注 → 复制 / 下载 → 注册宿主后「发送到 HawkSnap」入历史 | 全链路可用 | M4 P2 |
 | 14 | G5 soak（72h 连续录屏，无崩溃、内存增长 <10%）——**长测，可与发布并行，结果回填本档案** | 见 G5 定义 | 已知限制保留项 |
 
 ## 第③层：GitHub 发布前置与 tag 流程

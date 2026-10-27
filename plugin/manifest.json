@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "HawkSnap 截图",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "整页 / 可见区 / 区域截图，标注后复制、下载，或发送到 HawkSnap 桌面端历史。",
   "minimum_chrome_version": "116",
   "icons": {
