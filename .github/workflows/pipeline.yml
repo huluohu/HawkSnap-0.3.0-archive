@@ -1,18 +1,92 @@
-name: pipeline-bisect-1
-on: push
+# HawkSnap CI（plan D2/D6）：Rust 测试矩阵 + 前端测试/构建 + G6 i18n 覆盖率门
+# + G1 体积断言 + tag 触发的发布流水线（产物 + updater latest.json 草稿 Release）。
+#
+# —— 跨平台编译重构（M4 Task P0）——
+# `crates/hawksnap-platform-mac` 的 macOS 专属依赖（objc2*/screen-capture-kit/
+# av-foundation/block2/dispatch2）已全部移入
+# `[target.'cfg(target_os = "macos")'.dependencies]`，模块与平台 API 逐项
+# `#[cfg(target_os = "macos")]` 门控，非 macOS 平台提供**同名同签名**的桩
+# （明确 Err / 空值降级，绝不静默假装成功）。
+#
+# 门禁分档（评审修复轮 I2）：
+#   - Linux（ubuntu-24.04）：**硬门**——该腿已在真实 Linux runner 上跑绿。
+#   - macOS（macos-14）：**硬门**。
+#   - Windows（windows-2022）：**首轮为非阻塞平台验证**（continue-on-error），
+#     见 matrix include 处的完整理由与**翻门条件**。
+#
+# 发布仍为 **macOS-only**：跨平台编译 ≠ 跨平台分发（Windows/Linux 的打包、
+# 签名与 updater feed 口径另案裁定，见 release job 注）。
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
   rust-test:
     strategy:
       fail-fast: false
       matrix:
         os: [macos-14, ubuntu-24.04, windows-2022]
+        include:
+          # —— Windows 腿：**首轮非阻塞平台验证**（continue-on-error: true）——
+          #
+          # 为什么先不设成硬门（评审修复轮 I2）：本腿**从未在 Windows runner 上真正
+          # 执行过**——M4 P0 只在 Linux 远端验证过。Windows 侧的真实未知项：
+          #   1) wry / webview2-com 在构建期需要 **WebView2 SDK**（Windows 才有），
+          #      CI 镜像是否预装未验证；
+          #   2) xcap 的 **Windows 后端是与 macOS / X11 不同的代码路径**（GDI/DXGI，
+          #      枚举与抓屏实现各异），本仓库从未在该路径上编译或运行过；
+          #   3) rusqlite **bundled** feature 需要 **MSVC 工具链**编译 SQLite；
+          #   4) 路径 / 临时目录语义与 macOS / Linux 不同（%TEMP%、反斜杠、大小写
+          #      不敏感文件系统），历史库 / 命名 / 临时文件相关断言可能行为不同。
+          # 未知项是真实的，故**首次**运行不阻塞主分支（红 = 需要人看，但不是"代码
+          # 回归"的既定事实）。
+          #
+          # ★ 翻门条件（**一次绿即翻**，别忘做）：Windows 腿 `cargo test --workspace`
+          #   **首次跑绿**（无需人工跳过 / 无需任何 continue-on-error 豁免）→
+          #   1) 删掉本 include 段的 `continue-on-error: true`；
+          #   2) 删掉 job 级 `continue-on-error: ${{ matrix.continue-on-error }}`
+          #      （或改回 false）；
+          #   3) 把本段注释与文件头注释的「Windows：首轮非阻塞」改为「Windows：硬门」；
+          #   4) 同步更新 README「平台支持」一节的 CI 门禁段落。
+          - os: windows-2022
+            continue-on-error: true
+    # 矩阵级开关：仅 Windows 腿带该键（其余腿缺失 → 表达式为假 → 硬门）。
+    continue-on-error: ${{ matrix.continue-on-error == true }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - run: echo "rust-test probe on ${{ matrix.os }}"
+      - uses: dtolnay/rust-toolchain@stable
+      # TODO: 接入 `cargo clippy --workspace -- -D warnings`。当前存量代码在
+      # hawksnap-platform-mac 有 clippy 告警（neg_cmp_op_on_partial_ord），D2 裁定先
+      # 不让 lint 噪音阻塞三平台 bring-up；D6 收口时仍未清理，启用顺延到告警清零后。
+      - name: Install Linux system deps (webkit2gtk / tray / xcap X11+dbus)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libx11-dev libxext-dev libxrandr-dev libxtst-dev \
+            libxkbcommon-dev libdbus-1-dev
+      # —— 三平台同一条命令（macOS / Linux / Windows）：macOS 与 Linux 为**硬门**；
+      #    Windows 首轮为**非阻塞平台验证**（见 matrix include 的理由与翻门条件）。
+      #    非 macOS 平台上 macOS 专属的录屏/画中画/长截图/贴图/按键显示能力按 target
+      #    门控为**桩**（明确 Err / 空值降级）；**截图走跨平台 xcap 后端**（X11 /
+      #    Windows 上可能可用，未适配未实测）；其余纯逻辑（历史库、OCR、MP4 解析、
+      #    GIF 编码、状态机）照常跑测。
+      - name: cargo test --workspace (macOS / Linux / Windows)
+        run: cargo test --workspace
+
   frontend:
     runs-on: ubuntu-24.04
     defaults:
@@ -84,762 +158,8 @@ jobs:
       - name: check size (G1)
         run: bash scripts/check-size.sh
 
-  # ---- 官网部署（M4 Task P3：site/ → GitHub Pages）----
-  #
-  # 触发：workflow_dispatch（手动）或 push 到 main 且**本次变更触达 site/**——
-  # 用 git diff --name-only <before> <sha> 在 job 内判定（workflow 级 paths 过滤会
-  # 影响整个 CI 的触发，不能用）；before 缺失（新分支首个 push）/ 不可解析时按
-  # 「有变更」处理（宁多部署一次，绝不漏部署）。
-  #
-  # artifact = site/ 目录本身（纯静态、无构建——见 site/README.md 的「无框架无构建」口径）。
-  # 前置（一次性，仓库管理员）：Settings → Pages → Source 选 GitHub Actions，
-  # 否则 deploy-pages 报错。
-  pages:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    runs-on: ubuntu-24.04
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/checkout@v4
-        # fetch-depth: 0 —— push 变更检测要能解析 github.event.before（可能不是 HEAD~1，
-        # 一次推多个 commit 时浅克隆取不到该对象 → 误判为「有变更」多部署一次可接受，
-        # 这里干脆全量取，保证判定准确）。
-        with:
-          fetch-depth: 0
-      - name: Detect site/ changes (push only)
-        id: gate
-        if: github.event_name == 'push'
-        run: |
-          before="${{ github.event.before }}"
-          if [ -z "$before" ] || [[ "$before" =~ ^0+$ ]] || ! git cat-file -e "$before" 2>/dev/null; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "$before" "$GITHUB_SHA" | grep -q '^site/'; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Configure Pages
-        if: steps.gate.outputs.changed != 'false'
-        uses: actions/configure-pages@v5
-      - name: Upload site artifact
-        if: steps.gate.outputs.changed != 'false'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-      - name: Deploy to GitHub Pages
-        id: deployment
-        if: steps.gate.outputs.changed != 'false'
-        uses: actions/deploy-pages@v4
-
-  # ---- 发布流水线（plan D6，0.3.0 起 macOS-only）----
-  #
-  # 控制器前置条件（首次 tag 推送前必须完成，缺一签名步骤即硬失败——有意为之，
-  # 未签名产物绝不能进入 Release / updater feed）：
-  #   1. GitHub repo Secrets 配置：
-  #        TAURI_SIGNING_PRIVATE_KEY           — Ed25519 私钥（`npm run tauri signer generate`）
-  #        TAURI_SIGNING_PRIVATE_KEY_PASSWORD  — 私钥口令（无口令则设为空串）
-  #   2. tauri.conf.json 的 plugins.updater.pubkey 填入配对公钥（已随 0.1.0 填入，
-  #      8123f6c；更换密钥 = 替换此处 + conf + secrets）。
-  # 两者齐备后：push tag v* → release 构建签名（macOS）→ publish 组装 latest.json
-  # 并创建【草稿】Release，控制器人工复核后发布（plan D7）。
-  #
-  # **为什么仍只跑 macOS 一条腿**（M4 Task P0 后维持）：
-  #   跨平台**编译**已通（M4 P0：platform-mac 按 target 门控 + 平台桩，Linux/
-  #   macOS 的 `cargo test --workspace` 已是 CI 硬门；Windows 腿首轮为**非阻塞
-  #   平台验证**，首轮绿后翻硬门）；但跨平台**分发**是另一件事——Windows/Linux
-  #   的打包、代码签名与 updater feed 口径（macOS-only 的 feed 里没有 win32/
-  #   linux 键）尚未裁定。恢复矩阵前必须先定分发口径，否则 publish 的 feed 与
-  #   产物会对不上（make-latest 的 --platforms 门）。
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: macos-14
-    permissions:
-      contents: read
-    # 签名私钥只进本 job 的构建环境。缺失/为空时 tauri CLI 在签名阶段硬失败
-    # （实测两种报错："A public key has been found, but no private key" /
-    # "failed to decode secret key"），本 job 红 = 未签名产物绝不发布（有意为之）。
-    # 注意：pubkey 已随 0.1.0 填入（8123f6c）；若 pubkey 缺失/被回退为占位，同样
-    # 硬失败（无法 base64 解码）——pubkey 与 secrets 必须始终配对且先于 tag。
-    env:
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-      # macOS 产物用 HawkSnapCodesign 自签证书签名：TCC 授权按证书锚定，用户升级后
-      # 屏幕录制/辅助功能授权持久（adhoc 签名每次构建失配）。bundler 检测到
-      # APPLE_CERTIFICATE 即自动签名；secrets 未配置时仅 macOS 产物退回 adhoc（有告警）。
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-    steps:
-      # fetch-depth: 0 —— 「对应源码包」（AGPL §6）用 `git archive <tag>` 生成，
-      # 必须能取到 tag 对象；浅克隆（默认 depth=1）没有 tag 引用。
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: app/package-lock.json
-      - name: npm ci
-        working-directory: app
-        run: npm ci
-      # --config 合入 src-tauri/tauri.release.conf.json（内容仅 bundle.createUpdaterArtifacts:
-      # true）。为何独立成覆盖文件而不写进 tauri.conf.json：该开关开启后 tauri CLI 在缺
-      # TAURI_SIGNING_PRIVATE_KEY 时硬失败（"A public key has been found, but no private
-      # key"）——push 分支 / PR 的 keyless 构建（rust-test/size）会全红；只在 release job
-      # 合入，配合上方 secrets 缺失即失败 = 未签名产物绝不发布（有意为之）。
-      # --bundles 各平台只造发布所需（G1 dmg 门槛由 size job 把守）。
-      # 产物布局（tauri v2，createUpdaterArtifacts: true 时 v2 updater 直接用安装器
-      # 本体 + 同名 .sig；macOS 为 .app.tar.gz 归档 + .sig）：
-      #   macOS   target/release/bundle/macos/HawkSnap.app.tar.gz{,.sig} + dmg/*.dmg
-      # M4 P1：Native Messaging 宿主（hawksnap-host）是 feature 门控的独立 bin，
-      # 默认构建不含它 → 必须**先**构建并暂存给 tauri-bundler（externalBin，
-      # 见 src-tauri/tauri.release.conf.json 的
-      # bundle.externalBin: ["binaries/hawksnap-host"]），bundler 才会把它复制进
-      # .app（Contents/MacOS/hawksnap-host）。顺序很关键：bundler 先产出
-      # .app.tar.gz，事后再往 .app 里拷已经晚于归档生成。
-      # 暂存路径 app/src-tauri/binaries/hawksnap-host-<triple> 不入库（.gitignore）。
-      # （评审修复轮 P1：tauri v2 的 externalBin 是**文件名后缀**语义——
-      #  bundler 找的是 binaries/hawksnap-host-<triple>，不是 binaries/<triple>/…。）
-      - name: "Stage native messaging host (M4 P1)"
-        run: scripts/package-native-host.sh
-      - name: "tauri build (macOS: app + dmg)"
-        working-directory: app
-        run: npm run tauri build -- --config src-tauri/tauri.release.conf.json --bundles app dmg
-      - name: Upload updater payload + artifacts (macOS)
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-macos
-          if-no-files-found: error
-          path: |
-            target/release/bundle/macos/*.app.tar.gz
-            target/release/bundle/macos/*.app.tar.gz.sig
-            target/release/bundle/dmg/*.dmg
-      # —— AGPL §6「对应源码」包（0.3.0 合规收口）——
-      # 二进制分发必须附对应源码：git archive 该 tag 的**已提交内容**（含 Cargo.lock
-      # = 构建脚本与依赖锁定信息），随 Release 一起发布。发布出去的源码包与仓库
-      # 同源同版（tag 即版本），满足 AGPL-3.0-or-later 的源码提供义务。
-      - name: Build source archive (AGPL §6 corresponding source)
-        run: |
-          mkdir -p dist
-          git archive --format=tar.gz \
-            --prefix="HawkSnap-${GITHUB_REF_NAME}/" \
-            -o "dist/HawkSnap-${GITHUB_REF_NAME}-source.tar.gz" \
-            "${GITHUB_REF_NAME}"
-          tar -tzf "dist/HawkSnap-${GITHUB_REF_NAME}-source.tar.gz" | head -5
-      - name: Upload source archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-source
-          if-no-files-found: error
-          path: dist/HawkSnap-*-source.tar.gz
-
-  # 组装 updater feed 并建【草稿】Release：latest.json 的 URL 指向该 tag 的
-  # Release 下载地址（与 tauri.conf.json 的 updater endpoint
-  # releases/latest/download/latest.json 同一通道）；草稿态控制器人工复核、补全
-  # Release 说明（已知限制：macOS-only 发布、G5 N/A、Rust 文案未 i18n）后发布（plan D7）。
-  #
-  # 依赖关系：needs: release —— release（macOS 腿）红 = 无签名产物 → 本 job 不跑，
-  # **绝不产出无签名的 Release / feed**（未签名产物不得发布，有意为之）。
-  # needs 只列 release 一个 job（不再有矩阵）→ release 绿即本 job 跑，无条件判断
-  # 悬空；`if: startsWith(github.ref, 'refs/tags/v')` 与 release 的触发条件一致。
-  publish:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: release
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: release-*
-          merge-multiple: true
-          path: dist
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      # macOS-only 发布 → feed 只含 darwin 键（0.3.0 裁定）。--platforms 显式指定
-      # 参与平台：make-latest 对**未列出的**平台不再要求载荷（Linux/Windows 本就
-      # 没有产物），对**列出的**平台仍强制「恰好 1 份 + 签名齐全」（脏 feed 防线）。
-      - name: Assemble latest.json (updater feed)
-        run: node scripts/make-latest.mjs --tag "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dist dist --out dist --platforms darwin-aarch64
-      - name: Create draft GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --repo "$GITHUB_REPOSITORY" \
-            --draft \
-            --title "HawkSnap $GITHUB_REF_NAME" \
-            --notes "Draft assembled by CI (plan D6). macOS-only binary release (0.3.0 policy; distribution stays macOS-only — the M4 cross-platform work made Linux/Windows *compile* (CI true-gate), but Windows/Linux packaging + signing + updater-feed policy is still undecided). The corresponding source archive (AGPL-3.0-or-later §6) is attached to this release. Controller: review artifacts, finalize release notes, then publish (plan D7)." \
-            dist/*
-
-  plugin-test:
-    runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: plugin
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: npm install   # TODO: lockfile 提交后改为 npm ci
-      - run: npm test
-      - run: npm run build
-
-  size:
-    # G1 体积断言（≤15MB dmg，plan D2 落地、D6 起为正式门）。tauri build 慢是预期；
-    # continue-on-error: false——此 job 即 G1 断言本体，红 = 不达标，不允许静默。
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: app/package-lock.json
-      - name: npm ci
-        working-directory: app
-        run: npm ci
-      # M4 P1（评审修复轮 P2）：size job 必须构建**与发布件同款**的产物。
-      # 之前这里跑的是**不带** tauri.release.conf.json 的构建 → 那个 dmg 里
-      # **没有** Native Messaging 宿主（externalBin 只在 release 配置里开）→
-      # 体积门量的是一个「比发布件小」的 dmg（宿主 ~MB 级）→ 15MB 断言对真正
-      # 发布出去的包**不成立**。故：先暂存宿主，再用带 externalBin 的配置构建。
-      # 为什么用 tauri.host.conf.json 而不是 tauri.release.conf.json：后者还开了
-      # bundle.createUpdaterArtifacts，缺 TAURI_SIGNING_PRIVATE_KEY 时 tauri CLI
-      # 硬失败（PR/fork 无 secrets → 全红）。host conf 只开 externalBin，
-      # updater 产物不进 dmg（macOS 的 updater 载荷是同目录的 .app.tar.gz + .sig），
-      # 两者的 dmg 内容一致。
-      - name: Stage native messaging host (M4 P1)
-        run: scripts/package-native-host.sh
-      - name: tauri build (with native host bundled)
-        working-directory: app
-        run: npm run tauri build -- --config src-tauri/tauri.host.conf.json --bundles app dmg
-      - name: check size (G1)
-        run: bash scripts/check-size.sh
-
-  # ---- 官网部署（M4 Task P3：site/ → GitHub Pages）----
-  #
-  # 触发：workflow_dispatch（手动）或 push 到 main 且**本次变更触达 site/**——
-  # 用 git diff --name-only <before> <sha> 在 job 内判定（workflow 级 paths 过滤会
-  # 影响整个 CI 的触发，不能用）；before 缺失（新分支首个 push）/ 不可解析时按
-  # 「有变更」处理（宁多部署一次，绝不漏部署）。
-  #
-  # artifact = site/ 目录本身（纯静态、无构建——见 site/README.md 的「无框架无构建」口径）。
-  # 前置（一次性，仓库管理员）：Settings → Pages → Source 选 GitHub Actions，
-  # 否则 deploy-pages 报错。
-  pages:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    runs-on: ubuntu-24.04
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/checkout@v4
-        # fetch-depth: 0 —— push 变更检测要能解析 github.event.before（可能不是 HEAD~1，
-        # 一次推多个 commit 时浅克隆取不到该对象 → 误判为「有变更」多部署一次可接受，
-        # 这里干脆全量取，保证判定准确）。
-        with:
-          fetch-depth: 0
-      - name: Detect site/ changes (push only)
-        id: gate
-        if: github.event_name == 'push'
-        run: |
-          before="${{ github.event.before }}"
-          if [ -z "$before" ] || [[ "$before" =~ ^0+$ ]] || ! git cat-file -e "$before" 2>/dev/null; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "$before" "$GITHUB_SHA" | grep -q '^site/'; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Configure Pages
-        if: steps.gate.outputs.changed != 'false'
-        uses: actions/configure-pages@v5
-      - name: Upload site artifact
-        if: steps.gate.outputs.changed != 'false'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-      - name: Deploy to GitHub Pages
-        id: deployment
-        if: steps.gate.outputs.changed != 'false'
-        uses: actions/deploy-pages@v4
-
-  # ---- 发布流水线（plan D6，0.3.0 起 macOS-only）----
-  #
-  # 控制器前置条件（首次 tag 推送前必须完成，缺一签名步骤即硬失败——有意为之，
-  # 未签名产物绝不能进入 Release / updater feed）：
-  #   1. GitHub repo Secrets 配置：
-  #        TAURI_SIGNING_PRIVATE_KEY           — Ed25519 私钥（`npm run tauri signer generate`）
-  #        TAURI_SIGNING_PRIVATE_KEY_PASSWORD  — 私钥口令（无口令则设为空串）
-  #   2. tauri.conf.json 的 plugins.updater.pubkey 填入配对公钥（已随 0.1.0 填入，
-  #      8123f6c；更换密钥 = 替换此处 + conf + secrets）。
-  # 两者齐备后：push tag v* → release 构建签名（macOS）→ publish 组装 latest.json
-  # 并创建【草稿】Release，控制器人工复核后发布（plan D7）。
-  #
-  # **为什么仍只跑 macOS 一条腿**（M4 Task P0 后维持）：
-  #   跨平台**编译**已通（M4 P0：platform-mac 按 target 门控 + 平台桩，Linux/
-  #   macOS 的 `cargo test --workspace` 已是 CI 硬门；Windows 腿首轮为**非阻塞
-  #   平台验证**，首轮绿后翻硬门）；但跨平台**分发**是另一件事——Windows/Linux
-  #   的打包、代码签名与 updater feed 口径（macOS-only 的 feed 里没有 win32/
-  #   linux 键）尚未裁定。恢复矩阵前必须先定分发口径，否则 publish 的 feed 与
-  #   产物会对不上（make-latest 的 --platforms 门）。
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: macos-14
-    permissions:
-      contents: read
-    # 签名私钥只进本 job 的构建环境。缺失/为空时 tauri CLI 在签名阶段硬失败
-    # （实测两种报错："A public key has been found, but no private key" /
-    # "failed to decode secret key"），本 job 红 = 未签名产物绝不发布（有意为之）。
-    # 注意：pubkey 已随 0.1.0 填入（8123f6c）；若 pubkey 缺失/被回退为占位，同样
-    # 硬失败（无法 base64 解码）——pubkey 与 secrets 必须始终配对且先于 tag。
-    env:
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-      # macOS 产物用 HawkSnapCodesign 自签证书签名：TCC 授权按证书锚定，用户升级后
-      # 屏幕录制/辅助功能授权持久（adhoc 签名每次构建失配）。bundler 检测到
-      # APPLE_CERTIFICATE 即自动签名；secrets 未配置时仅 macOS 产物退回 adhoc（有告警）。
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-    steps:
-      # fetch-depth: 0 —— 「对应源码包」（AGPL §6）用 `git archive <tag>` 生成，
-      # 必须能取到 tag 对象；浅克隆（默认 depth=1）没有 tag 引用。
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: app/package-lock.json
-      - name: npm ci
-        working-directory: app
-        run: npm ci
-      # --config 合入 src-tauri/tauri.release.conf.json（内容仅 bundle.createUpdaterArtifacts:
-      # true）。为何独立成覆盖文件而不写进 tauri.conf.json：该开关开启后 tauri CLI 在缺
-      # TAURI_SIGNING_PRIVATE_KEY 时硬失败（"A public key has been found, but no private
-      # key"）——push 分支 / PR 的 keyless 构建（rust-test/size）会全红；只在 release job
-      # 合入，配合上方 secrets 缺失即失败 = 未签名产物绝不发布（有意为之）。
-      # --bundles 各平台只造发布所需（G1 dmg 门槛由 size job 把守）。
-      # 产物布局（tauri v2，createUpdaterArtifacts: true 时 v2 updater 直接用安装器
-      # 本体 + 同名 .sig；macOS 为 .app.tar.gz 归档 + .sig）：
-      #   macOS   target/release/bundle/macos/HawkSnap.app.tar.gz{,.sig} + dmg/*.dmg
-      # M4 P1：Native Messaging 宿主（hawksnap-host）是 feature 门控的独立 bin，
-      # 默认构建不含它 → 必须**先**构建并暂存给 tauri-bundler（externalBin，
-      # 见 src-tauri/tauri.release.conf.json 的
-      # bundle.externalBin: ["binaries/hawksnap-host"]），bundler 才会把它复制进
-      # .app（Contents/MacOS/hawksnap-host）。顺序很关键：bundler 先产出
-      # .app.tar.gz，事后再往 .app 里拷已经晚于归档生成。
-      # 暂存路径 app/src-tauri/binaries/hawksnap-host-<triple> 不入库（.gitignore）。
-      # （评审修复轮 P1：tauri v2 的 externalBin 是**文件名后缀**语义——
-      #  bundler 找的是 binaries/hawksnap-host-<triple>，不是 binaries/<triple>/…。）
-      - name: "Stage native messaging host (M4 P1)"
-        run: scripts/package-native-host.sh
-      - name: "tauri build (macOS: app + dmg)"
-        working-directory: app
-        run: npm run tauri build -- --config src-tauri/tauri.release.conf.json --bundles app dmg
-      - name: Upload updater payload + artifacts (macOS)
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-macos
-          if-no-files-found: error
-          path: |
-            target/release/bundle/macos/*.app.tar.gz
-            target/release/bundle/macos/*.app.tar.gz.sig
-            target/release/bundle/dmg/*.dmg
-      # —— AGPL §6「对应源码」包（0.3.0 合规收口）——
-      # 二进制分发必须附对应源码：git archive 该 tag 的**已提交内容**（含 Cargo.lock
-      # = 构建脚本与依赖锁定信息），随 Release 一起发布。发布出去的源码包与仓库
-      # 同源同版（tag 即版本），满足 AGPL-3.0-or-later 的源码提供义务。
-      - name: Build source archive (AGPL §6 corresponding source)
-        run: |
-          mkdir -p dist
-          git archive --format=tar.gz \
-            --prefix="HawkSnap-${GITHUB_REF_NAME}/" \
-            -o "dist/HawkSnap-${GITHUB_REF_NAME}-source.tar.gz" \
-            "${GITHUB_REF_NAME}"
-          tar -tzf "dist/HawkSnap-${GITHUB_REF_NAME}-source.tar.gz" | head -5
-      - name: Upload source archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-source
-          if-no-files-found: error
-          path: dist/HawkSnap-*-source.tar.gz
-
-  # 组装 updater feed 并建【草稿】Release：latest.json 的 URL 指向该 tag 的
-  # Release 下载地址（与 tauri.conf.json 的 updater endpoint
-  # releases/latest/download/latest.json 同一通道）；草稿态控制器人工复核、补全
-  # Release 说明（已知限制：macOS-only 发布、G5 N/A、Rust 文案未 i18n）后发布（plan D7）。
-  #
-  # 依赖关系：needs: release —— release（macOS 腿）红 = 无签名产物 → 本 job 不跑，
-  # **绝不产出无签名的 Release / feed**（未签名产物不得发布，有意为之）。
-  # needs 只列 release 一个 job（不再有矩阵）→ release 绿即本 job 跑，无条件判断
-  # 悬空；`if: startsWith(github.ref, 'refs/tags/v')` 与 release 的触发条件一致。
-  publish:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: release
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: release-*
-          merge-multiple: true
-          path: dist
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      # macOS-only 发布 → feed 只含 darwin 键（0.3.0 裁定）。--platforms 显式指定
-      # 参与平台：make-latest 对**未列出的**平台不再要求载荷（Linux/Windows 本就
-      # 没有产物），对**列出的**平台仍强制「恰好 1 份 + 签名齐全」（脏 feed 防线）。
-      - name: Assemble latest.json (updater feed)
-        run: node scripts/make-latest.mjs --tag "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dist dist --out dist --platforms darwin-aarch64
-      - name: Create draft GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --repo "$GITHUB_REPOSITORY" \
-            --draft \
-            --title "HawkSnap $GITHUB_REF_NAME" \
-            --notes "Draft assembled by CI (plan D6). macOS-only binary release (0.3.0 policy; distribution stays macOS-only — the M4 cross-platform work made Linux/Windows *compile* (CI true-gate), but Windows/Linux packaging + signing + updater-feed policy is still undecided). The corresponding source archive (AGPL-3.0-or-later §6) is attached to this release. Controller: review artifacts, finalize release notes, then publish (plan D7)." \
-            dist/*
-
-  size:
-    # G1 体积断言（≤15MB dmg，plan D2 落地、D6 起为正式门）。tauri build 慢是预期；
-    # continue-on-error: false——此 job 即 G1 断言本体，红 = 不达标，不允许静默。
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: app/package-lock.json
-      - name: npm ci
-        working-directory: app
-        run: npm ci
-      # M4 P1（评审修复轮 P2）：size job 必须构建**与发布件同款**的产物。
-      # 之前这里跑的是**不带** tauri.release.conf.json 的构建 → 那个 dmg 里
-      # **没有** Native Messaging 宿主（externalBin 只在 release 配置里开）→
-      # 体积门量的是一个「比发布件小」的 dmg（宿主 ~MB 级）→ 15MB 断言对真正
-      # 发布出去的包**不成立**。故：先暂存宿主，再用带 externalBin 的配置构建。
-      # 为什么用 tauri.host.conf.json 而不是 tauri.release.conf.json：后者还开了
-      # bundle.createUpdaterArtifacts，缺 TAURI_SIGNING_PRIVATE_KEY 时 tauri CLI
-      # 硬失败（PR/fork 无 secrets → 全红）。host conf 只开 externalBin，
-      # updater 产物不进 dmg（macOS 的 updater 载荷是同目录的 .app.tar.gz + .sig），
-      # 两者的 dmg 内容一致。
-      - name: Stage native messaging host (M4 P1)
-        run: scripts/package-native-host.sh
-      - name: tauri build (with native host bundled)
-        working-directory: app
-        run: npm run tauri build -- --config src-tauri/tauri.host.conf.json --bundles app dmg
-      - name: check size (G1)
-        run: bash scripts/check-size.sh
-
-  # ---- 官网部署（M4 Task P3：site/ → GitHub Pages）----
-  #
-  # 触发：workflow_dispatch（手动）或 push 到 main 且**本次变更触达 site/**——
-  # 用 git diff --name-only <before> <sha> 在 job 内判定（workflow 级 paths 过滤会
-  # 影响整个 CI 的触发，不能用）；before 缺失（新分支首个 push）/ 不可解析时按
-  # 「有变更」处理（宁多部署一次，绝不漏部署）。
-  #
-  # artifact = site/ 目录本身（纯静态、无构建——见 site/README.md 的「无框架无构建」口径）。
-  # 前置（一次性，仓库管理员）：Settings → Pages → Source 选 GitHub Actions，
-  # 否则 deploy-pages 报错。
-  pages:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    runs-on: ubuntu-24.04
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/checkout@v4
-        # fetch-depth: 0 —— push 变更检测要能解析 github.event.before（可能不是 HEAD~1，
-        # 一次推多个 commit 时浅克隆取不到该对象 → 误判为「有变更」多部署一次可接受，
-        # 这里干脆全量取，保证判定准确）。
-        with:
-          fetch-depth: 0
-      - name: Detect site/ changes (push only)
-        id: gate
-        if: github.event_name == 'push'
-        run: |
-          before="${{ github.event.before }}"
-          if [ -z "$before" ] || [[ "$before" =~ ^0+$ ]] || ! git cat-file -e "$before" 2>/dev/null; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "$before" "$GITHUB_SHA" | grep -q '^site/'; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Configure Pages
-        if: steps.gate.outputs.changed != 'false'
-        uses: actions/configure-pages@v5
-      - name: Upload site artifact
-        if: steps.gate.outputs.changed != 'false'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-      - name: Deploy to GitHub Pages
-        id: deployment
-        if: steps.gate.outputs.changed != 'false'
-        uses: actions/deploy-pages@v4
-
-  # ---- 发布流水线（plan D6，0.3.0 起 macOS-only）----
-  #
-  # 控制器前置条件（首次 tag 推送前必须完成，缺一签名步骤即硬失败——有意为之，
-  # 未签名产物绝不能进入 Release / updater feed）：
-  #   1. GitHub repo Secrets 配置：
-  #        TAURI_SIGNING_PRIVATE_KEY           — Ed25519 私钥（`npm run tauri signer generate`）
-  #        TAURI_SIGNING_PRIVATE_KEY_PASSWORD  — 私钥口令（无口令则设为空串）
-  #   2. tauri.conf.json 的 plugins.updater.pubkey 填入配对公钥（已随 0.1.0 填入，
-  #      8123f6c；更换密钥 = 替换此处 + conf + secrets）。
-  # 两者齐备后：push tag v* → release 构建签名（macOS）→ publish 组装 latest.json
-  # 并创建【草稿】Release，控制器人工复核后发布（plan D7）。
-  #
-  # **为什么仍只跑 macOS 一条腿**（M4 Task P0 后维持）：
-  #   跨平台**编译**已通（M4 P0：platform-mac 按 target 门控 + 平台桩，Linux/
-  #   macOS 的 `cargo test --workspace` 已是 CI 硬门；Windows 腿首轮为**非阻塞
-  #   平台验证**，首轮绿后翻硬门）；但跨平台**分发**是另一件事——Windows/Linux
-  #   的打包、代码签名与 updater feed 口径（macOS-only 的 feed 里没有 win32/
-  #   linux 键）尚未裁定。恢复矩阵前必须先定分发口径，否则 publish 的 feed 与
-  #   产物会对不上（make-latest 的 --platforms 门）。
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: macos-14
-    permissions:
-      contents: read
-    # 签名私钥只进本 job 的构建环境。缺失/为空时 tauri CLI 在签名阶段硬失败
-    # （实测两种报错："A public key has been found, but no private key" /
-    # "failed to decode secret key"），本 job 红 = 未签名产物绝不发布（有意为之）。
-    # 注意：pubkey 已随 0.1.0 填入（8123f6c）；若 pubkey 缺失/被回退为占位，同样
-    # 硬失败（无法 base64 解码）——pubkey 与 secrets 必须始终配对且先于 tag。
-    env:
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-      # macOS 产物用 HawkSnapCodesign 自签证书签名：TCC 授权按证书锚定，用户升级后
-      # 屏幕录制/辅助功能授权持久（adhoc 签名每次构建失配）。bundler 检测到
-      # APPLE_CERTIFICATE 即自动签名；secrets 未配置时仅 macOS 产物退回 adhoc（有告警）。
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-    steps:
-      # fetch-depth: 0 —— 「对应源码包」（AGPL §6）用 `git archive <tag>` 生成，
-      # 必须能取到 tag 对象；浅克隆（默认 depth=1）没有 tag 引用。
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: app/package-lock.json
-      - name: npm ci
-        working-directory: app
-        run: npm ci
-      # --config 合入 src-tauri/tauri.release.conf.json（内容仅 bundle.createUpdaterArtifacts:
-      # true）。为何独立成覆盖文件而不写进 tauri.conf.json：该开关开启后 tauri CLI 在缺
-      # TAURI_SIGNING_PRIVATE_KEY 时硬失败（"A public key has been found, but no private
-      # key"）——push 分支 / PR 的 keyless 构建（rust-test/size）会全红；只在 release job
-      # 合入，配合上方 secrets 缺失即失败 = 未签名产物绝不发布（有意为之）。
-      # --bundles 各平台只造发布所需（G1 dmg 门槛由 size job 把守）。
-      # 产物布局（tauri v2，createUpdaterArtifacts: true 时 v2 updater 直接用安装器
-      # 本体 + 同名 .sig；macOS 为 .app.tar.gz 归档 + .sig）：
-      #   macOS   target/release/bundle/macos/HawkSnap.app.tar.gz{,.sig} + dmg/*.dmg
-      # M4 P1：Native Messaging 宿主（hawksnap-host）是 feature 门控的独立 bin，
-      # 默认构建不含它 → 必须**先**构建并暂存给 tauri-bundler（externalBin，
-      # 见 src-tauri/tauri.release.conf.json 的
-      # bundle.externalBin: ["binaries/hawksnap-host"]），bundler 才会把它复制进
-      # .app（Contents/MacOS/hawksnap-host）。顺序很关键：bundler 先产出
-      # .app.tar.gz，事后再往 .app 里拷已经晚于归档生成。
-      # 暂存路径 app/src-tauri/binaries/hawksnap-host-<triple> 不入库（.gitignore）。
-      # （评审修复轮 P1：tauri v2 的 externalBin 是**文件名后缀**语义——
-      #  bundler 找的是 binaries/hawksnap-host-<triple>，不是 binaries/<triple>/…。）
-      - name: "Stage native messaging host (M4 P1)"
-        run: scripts/package-native-host.sh
-      - name: "tauri build (macOS: app + dmg)"
-        working-directory: app
-        run: npm run tauri build -- --config src-tauri/tauri.release.conf.json --bundles app dmg
-      - name: Upload updater payload + artifacts (macOS)
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-macos
-          if-no-files-found: error
-          path: |
-            target/release/bundle/macos/*.app.tar.gz
-            target/release/bundle/macos/*.app.tar.gz.sig
-            target/release/bundle/dmg/*.dmg
-      # —— AGPL §6「对应源码」包（0.3.0 合规收口）——
-      # 二进制分发必须附对应源码：git archive 该 tag 的**已提交内容**（含 Cargo.lock
-      # = 构建脚本与依赖锁定信息），随 Release 一起发布。发布出去的源码包与仓库
-      # 同源同版（tag 即版本），满足 AGPL-3.0-or-later 的源码提供义务。
-      - name: Build source archive (AGPL §6 corresponding source)
-        run: |
-          mkdir -p dist
-          git archive --format=tar.gz \
-            --prefix="HawkSnap-${GITHUB_REF_NAME}/" \
-            -o "dist/HawkSnap-${GITHUB_REF_NAME}-source.tar.gz" \
-            "${GITHUB_REF_NAME}"
-          tar -tzf "dist/HawkSnap-${GITHUB_REF_NAME}-source.tar.gz" | head -5
-      - name: Upload source archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-source
-          if-no-files-found: error
-          path: dist/HawkSnap-*-source.tar.gz
-
-  # 组装 updater feed 并建【草稿】Release：latest.json 的 URL 指向该 tag 的
-  # Release 下载地址（与 tauri.conf.json 的 updater endpoint
-  # releases/latest/download/latest.json 同一通道）；草稿态控制器人工复核、补全
-  # Release 说明（已知限制：macOS-only 发布、G5 N/A、Rust 文案未 i18n）后发布（plan D7）。
-  #
-  # 依赖关系：needs: release —— release（macOS 腿）红 = 无签名产物 → 本 job 不跑，
-  # **绝不产出无签名的 Release / feed**（未签名产物不得发布，有意为之）。
-  # needs 只列 release 一个 job（不再有矩阵）→ release 绿即本 job 跑，无条件判断
-  # 悬空；`if: startsWith(github.ref, 'refs/tags/v')` 与 release 的触发条件一致。
-  publish:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: release
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: release-*
-          merge-multiple: true
-          path: dist
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      # macOS-only 发布 → feed 只含 darwin 键（0.3.0 裁定）。--platforms 显式指定
-      # 参与平台：make-latest 对**未列出的**平台不再要求载荷（Linux/Windows 本就
-      # 没有产物），对**列出的**平台仍强制「恰好 1 份 + 签名齐全」（脏 feed 防线）。
-      - name: Assemble latest.json (updater feed)
-        run: node scripts/make-latest.mjs --tag "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dist dist --out dist --platforms darwin-aarch64
-      - name: Create draft GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --repo "$GITHUB_REPOSITORY" \
-            --draft \
-            --title "HawkSnap $GITHUB_REF_NAME" \
-            --notes "Draft assembled by CI (plan D6). macOS-only binary release (0.3.0 policy; distribution stays macOS-only — the M4 cross-platform work made Linux/Windows *compile* (CI true-gate), but Windows/Linux packaging + signing + updater-feed policy is still undecided). The corresponding source archive (AGPL-3.0-or-later §6) is attached to this release. Controller: review artifacts, finalize release notes, then publish (plan D7)." \
-            dist/*
-  size:
-    # G1 体积断言（≤15MB dmg，plan D2 落地、D6 起为正式门）。tauri build 慢是预期；
-    # continue-on-error: false——此 job 即 G1 断言本体，红 = 不达标，不允许静默。
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: app/package-lock.json
-      - name: npm ci
-        working-directory: app
-        run: npm ci
-      # M4 P1（评审修复轮 P2）：size job 必须构建**与发布件同款**的产物。
-      # 之前这里跑的是**不带** tauri.release.conf.json 的构建 → 那个 dmg 里
-      # **没有** Native Messaging 宿主（externalBin 只在 release 配置里开）→
-      # 体积门量的是一个「比发布件小」的 dmg（宿主 ~MB 级）→ 15MB 断言对真正
-      # 发布出去的包**不成立**。故：先暂存宿主，再用带 externalBin 的配置构建。
-      # 为什么用 tauri.host.conf.json 而不是 tauri.release.conf.json：后者还开了
-      # bundle.createUpdaterArtifacts，缺 TAURI_SIGNING_PRIVATE_KEY 时 tauri CLI
-      # 硬失败（PR/fork 无 secrets → 全红）。host conf 只开 externalBin，
-      # updater 产物不进 dmg（macOS 的 updater 载荷是同目录的 .app.tar.gz + .sig），
-      # 两者的 dmg 内容一致。
-      - name: Stage native messaging host (M4 P1)
-        run: scripts/package-native-host.sh
-      - name: tauri build (with native host bundled)
-        working-directory: app
-        run: npm run tauri build -- --config src-tauri/tauri.host.conf.json --bundles app dmg
-      - name: check size (G1)
-        run: bash scripts/check-size.sh
-
-  # ---- 官网部署（M4 Task P3：site/ → GitHub Pages）----
-  #
-  # 触发：workflow_dispatch（手动）或 push 到 main 且**本次变更触达 site/**——
-  # 用 git diff --name-only <before> <sha> 在 job 内判定（workflow 级 paths 过滤会
-  # 影响整个 CI 的触发，不能用）；before 缺失（新分支首个 push）/ 不可解析时按
-  # 「有变更」处理（宁多部署一次，绝不漏部署）。
-  #
-  # artifact = site/ 目录本身（纯静态、无构建——见 site/README.md 的「无框架无构建」口径）。
-  # 前置（一次性，仓库管理员）：Settings → Pages → Source 选 GitHub Actions，
-  # 否则 deploy-pages 报错。
-  pages:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    runs-on: ubuntu-24.04
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/checkout@v4
-        # fetch-depth: 0 —— push 变更检测要能解析 github.event.before（可能不是 HEAD~1，
-        # 一次推多个 commit 时浅克隆取不到该对象 → 误判为「有变更」多部署一次可接受，
-        # 这里干脆全量取，保证判定准确）。
-        with:
-          fetch-depth: 0
-      - name: Detect site/ changes (push only)
-        id: gate
-        if: github.event_name == 'push'
-        run: |
-          before="${{ github.event.before }}"
-          if [ -z "$before" ] || [[ "$before" =~ ^0+$ ]] || ! git cat-file -e "$before" 2>/dev/null; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "$before" "$GITHUB_SHA" | grep -q '^site/'; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Configure Pages
-        if: steps.gate.outputs.changed != 'false'
-        uses: actions/configure-pages@v5
-      - name: Upload site artifact
-        if: steps.gate.outputs.changed != 'false'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-      - name: Deploy to GitHub Pages
-        id: deployment
-        if: steps.gate.outputs.changed != 'false'
-        uses: actions/deploy-pages@v4
-
+  # 官网部署已拆分至 .github/workflows/deploy-site.yml（2026-10-28：Pages 服务
+  # 状态异常时 pages job 会把整个 pipeline 拖成 startup_failure，独立 workflow 隔离故障域）。
   # ---- 发布流水线（plan D6，0.3.0 起 macOS-only）----
   #
   # 控制器前置条件（首次 tag 推送前必须完成，缺一签名步骤即硬失败——有意为之，
