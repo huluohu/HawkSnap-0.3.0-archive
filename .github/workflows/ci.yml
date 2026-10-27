@@ -1,13 +1,16 @@
 # HawkSnap CI（plan D2/D6）：Rust 测试矩阵 + 前端测试/构建 + G6 i18n 覆盖率门
 # + G1 体积断言 + tag 触发的发布流水线（产物 + updater latest.json 草稿 Release）。
 #
-# —— 0.3.0 发布策略裁定（控制器）——
-# **macOS-only 发布**：release / publish job 只跑 macOS 一条腿；Linux / Windows 的
-# rust-test 腿保留（观测价值）但 `continue-on-error: true`——因为
-# `crates/hawksnap-platform-mac` 的 objc2*/screen-capture-kit/av-foundation/
-# block2/dispatch2/chrono 是**无条件依赖**（非 macOS 编译必失败，52 errors），
-# 在 M4 跨平台重构前，这些腿的红/绿不代表产品状态，只制造假信号。
-# 跨平台编译重构（platform-mac 按 target 门控 + 平台桩）顺延到 M4。
+# —— 跨平台编译重构（M4 Task P0）——
+# `crates/hawksnap-platform-mac` 的 macOS 专属依赖（objc2*/screen-capture-kit/
+# av-foundation/block2/dispatch2）已全部移入
+# `[target.'cfg(target_os = "macos")'.dependencies]`，模块与平台 API 逐项
+# `#[cfg(target_os = "macos")]` 门控，非 macOS 平台提供**同名同签名**的桩
+# （明确 Err / 空值降级，绝不静默假装成功）。故 Linux / Windows 腿的
+# `cargo test --workspace` 现在是**真门**（不再 continue-on-error）。
+#
+# 发布仍为 **macOS-only**：跨平台编译 ≠ 跨平台分发（Windows/Linux 的打包、
+# 签名与 updater feed 口径另案裁定，见 release job 注）。
 name: CI
 
 on: [push, pull_request]
@@ -41,19 +44,11 @@ jobs:
             libssl-dev \
             libx11-dev libxext-dev libxrandr-dev libxtst-dev \
             libxkbcommon-dev libdbus-1-dev
-      # —— 非 macOS 腿：允许失败（continue-on-error）——
-      # 理由：crates/hawksnap-platform-mac 的平台依赖（objc2*/screen-capture-kit/
-      # av-foundation/block2/dispatch2/chrono）当前是**无条件**依赖，Linux/Windows
-      # 上 `cargo test --workspace` 必然编译失败（实测 52 errors）→ 这两条腿的红
-      # 是**已知且已裁定**的状态，不是回归信号。让它红只会淹没真信号（假红）。
-      # 保留这两条腿是为了观察依赖解析/系统库层面的变化；真正生效的是 macOS 腿。
-      # 跨平台编译重构顺延 M4（platform-mac 按 target 门控 + 平台桩）。
-      - name: "cargo test (non-macOS legs: allowed to fail until the M4 refactor)"
-        if: runner.os != 'macOS'
-        continue-on-error: true
-        run: cargo test --workspace
-      - name: cargo test
-        if: runner.os == 'macOS'
+      # —— 三平台真门（M4 Task P0 后）：macOS / Linux / Windows 同一条命令，
+      #    全部为硬门（无 continue-on-error）。非 macOS 平台上 macOS 专属的
+      #    截图/录屏/贴图能力按 target 门控为**桩**（明确 Err / 空值降级），
+      #    其余纯逻辑（历史库、OCR、MP4 解析、GIF 编码、状态机）照常跑测。
+      - name: cargo test --workspace (macOS / Linux / Windows)
         run: cargo test --workspace
 
   frontend:
@@ -107,12 +102,12 @@ jobs:
   # 两者齐备后：push tag v* → release 构建签名（macOS）→ publish 组装 latest.json
   # 并创建【草稿】Release，控制器人工复核后发布（plan D7）。
   #
-  # **为什么只跑 macOS 一条腿**（0.3.0 控制器裁定）：
-  #   `crates/hawksnap-platform-mac` 的平台依赖（objc2*/screen-capture-kit/
-  #   av-foundation/block2/dispatch2/chrono）是无条件依赖 → Linux/Windows 上
-  #   `tauri build` 必失败（52 errors）→ 矩阵里那两条腿只会把 release 拖红，
-  #   publish 被 needs 跳过 → **打 tag 拿不到任何二进制与 updater feed**。
-  #   跨平台编译重构（platform-mac 按 target 门控）顺延 M4；届时再恢复矩阵。
+  # **为什么仍只跑 macOS 一条腿**（M4 Task P0 后维持）：
+  #   跨平台**编译**已通（M4 P0：platform-mac 按 target 门控 + 平台桩，Linux/
+  #   Windows 的 `cargo test --workspace` 已是 CI 真门）；但跨平台**分发**是另一
+  #   件事——Windows/Linux 的打包、代码签名与 updater feed 口径（macOS-only 的
+  #   feed 里没有 win32/linux 键）尚未裁定。恢复矩阵前必须先定分发口径，
+  #   否则 publish 的 feed 与产物会对不上（make-latest 的 --platforms 门）。
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-14
@@ -224,5 +219,5 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --draft \
             --title "HawkSnap $GITHUB_REF_NAME" \
-            --notes "Draft assembled by CI (plan D6). macOS-only binary release (0.3.0 policy; cross-platform build refactor deferred to M4). The corresponding source archive (AGPL-3.0-or-later §6) is attached to this release. Controller: review artifacts, finalize release notes, then publish (plan D7)." \
+            --notes "Draft assembled by CI (plan D6). macOS-only binary release (0.3.0 policy; distribution stays macOS-only — the M4 cross-platform work made Linux/Windows *compile* (CI true-gate), but Windows/Linux packaging + signing + updater-feed policy is still undecided). The corresponding source archive (AGPL-3.0-or-later §6) is attached to this release. Controller: review artifacts, finalize release notes, then publish (plan D7)." \
             dist/*

@@ -51,13 +51,18 @@
 //! 共享状态一把 Mutex 串行化（phase 检查 + 时钟更新同锁，无 TOCTOU）。
 
 use std::path::PathBuf;
+#[cfg(target_os = "macos")]
 use std::ptr::NonNull;
 
 use chrono::{DateTime, Local};
+#[cfg(target_os = "macos")]
 use objc2::rc::Retained;
+#[cfg(target_os = "macos")]
 use objc2::runtime::ProtocolObject;
+#[cfg(target_os = "macos")]
 use objc2::{define_class, msg_send, AnyThread, DefinedClass};
 
+#[cfg(target_os = "macos")]
 use objc2_av_foundation::{
     AVAssetWriter, AVAssetWriterInput, AVAssetWriterInputPixelBufferAdaptor,
     AVAssetWriterStatus, AVFileTypeMPEG4, AVMediaTypeAudio, AVMediaTypeVideo,
@@ -67,11 +72,17 @@ use objc2_av_foundation::{
     AVCaptureOutput, AVCaptureSession, AVCaptureVideoDataOutput,
     AVCaptureVideoDataOutputSampleBufferDelegate,
 };
+#[cfg(target_os = "macos")]
 use objc2_core_foundation::CFRetained;
+#[cfg(target_os = "macos")]
 use objc2_core_media::{kCMTimeInvalid, CMSampleBuffer, CMSampleTimingInfo, CMTime};
+#[cfg(target_os = "macos")]
 use objc2_core_video::{kCVPixelFormatType_32BGRA, CVPixelBuffer, CVPixelBufferLockFlags};
+#[cfg(target_os = "macos")]
 use objc2::runtime::NSObject;
+#[cfg(target_os = "macos")]
 use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString, NSURL, NSError, NSObjectProtocol};
+#[cfg(target_os = "macos")]
 use objc2_screen_capture_kit::{
     SCContentFilter, SCRunningApplication, SCShareableContent, SCStream, SCStreamConfiguration,
     SCStreamDelegate, SCStreamOutput, SCStreamOutputType,
@@ -236,6 +247,7 @@ pub struct LogicalRect {
 }
 
 /// 区域录制流参数：SCStreamConfiguration 的 sourceRect + 输出帧像素尺寸。
+#[cfg(target_os = "macos")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RegionStreamParams {
     /// `SCStreamConfiguration.sourceRect`——**points**（display 本地逻辑坐标，
@@ -257,6 +269,7 @@ pub struct RegionStreamParams {
 /// 偶数像素取整：h264（4:2:0 色度子采样）对奇数帧宽高的编码器路径不可靠
 /// （AVAssetWriter 实践：奇数尺寸可能收尾失败/花屏）——向下取到偶数。输入 ≥ 2
 /// 时结果 ≥ 2（调用方另设下限守卫）。
+#[cfg(target_os = "macos")]
 fn even_px(v: f64) -> u32 {
     (v.round() as u32 / 2) * 2
 }
@@ -265,6 +278,7 @@ fn even_px(v: f64) -> u32 {
 /// （points 直传，夹取进显示边界）+ 输出像素尺寸（× scale 后偶数取整）。
 /// 选区来自覆盖层 webview，已被前端夹取进显示边界——此处夹取是防御性复算（hover
 /// 直选的 AX 帧理论上可能越界），同边界语义：越界部分裁掉、完全出界/退化 → Err。
+#[cfg(target_os = "macos")]
 pub fn region_stream_params(
     region: LogicalRect,
     display_logical_w: f64,
@@ -810,13 +824,18 @@ pub fn mp4_video_sample_deltas(data: &[u8]) -> Option<Vec<f64>> {
 // macOS 管线（SCStream → AVAssetWriter）
 // ---------------------------------------------------------------------------
 
+#[cfg(target_os = "macos")]
 const OUTPUT_TIMESCALE: i32 = 600;
 
 // —— AVAudioSettings.h 常量未生成（objc2-av-foundation 只生成类/协议）→ 硬编码 ——
+#[cfg(target_os = "macos")]
 const AV_FORMAT_ID_KEY: &str = "AVFormatIDKey";
+#[cfg(target_os = "macos")]
 const AV_SAMPLE_RATE_KEY: &str = "AVSampleRateKey";
+#[cfg(target_os = "macos")]
 const AV_NUMBER_OF_CHANNELS_KEY: &str = "AVNumberOfChannelsKey";
 /// kAudioFormatMPEG4AAC = 'aac '（AudioToolbox 四字符码）。
+#[cfg(target_os = "macos")]
 const K_AUDIO_FORMAT_MPEG4_AAC: i64 = 0x6161_6320;
 
 /// 录屏元信息（stop 后供 app 层历史入库 w/h；`excluded_apps` = 视频自排除的
@@ -832,12 +851,14 @@ pub struct RecordingInfo {
 
 /// 共享运行态：帧回调（两条 dispatch 队列）与控制方（start/pause/resume/stop）交汇。
 /// 一把锁串行化 phase 检查 + 时钟更新（模块注的 TOCTOU 论证基于此）。
+#[cfg(target_os = "macos")]
 struct RecShared {
     /// 0 = recording（正常 append），1 = paused（回调丢帧），2 = stopping（回调丢帧）。
     phase: std::sync::atomic::AtomicU8,
     state: std::sync::Mutex<Option<RecSession>>,
 }
 
+#[cfg(target_os = "macos")]
 struct RecSession {
     clock: PauseClock,
     video_gate: StreamGate,
@@ -866,6 +887,7 @@ struct RecSession {
 }
 
 // —— ScreenCaptureKit 不覆盖 CoreGraphics 显示查询 → ax.rs 同款裸 extern（4 个 C 函数）——
+#[cfg(target_os = "macos")]
 mod cg_display_ffi {
     // CGDirectDisplayID = UInt32（CGDisplayConfiguration.h）。
     pub type CGDirectDisplayID = u32;
@@ -884,27 +906,32 @@ mod cg_display_ffi {
 
 /// 主显示器 id（N2：app 层 GIF 端到端测试与 start_region 同源的显示器入参；
 /// 生产启动路径的区域 id 来自覆盖层 payload，不经本函数）。
+#[cfg(target_os = "macos")]
 pub fn main_display_id() -> u32 {
     unsafe { cg_display_ffi::CGMainDisplayID() }
 }
 
 /// 显示器逻辑边界（points，N3 F9 探针算缩放用；与 begin() 同一 CG 口径）。
 /// SAFETY: 纯查询 extern（无副作用），由 pub 封装收口 unsafe。
+#[cfg(target_os = "macos")]
 pub fn display_bounds(display_id: u32) -> objc2_core_foundation::CGRect {
     unsafe { cg_display_ffi::CGDisplayBounds(display_id) }
 }
 
 /// 显示器物理像素宽（N3 F9 探针算缩放用，同上）。
+#[cfg(target_os = "macos")]
 pub fn display_pixels_wide(display_id: u32) -> usize {
     unsafe { cg_display_ffi::CGDisplayPixelsWide(display_id) }
 }
 
 // —— 帧回调对象（SCStreamOutput + SCStreamDelegate）——
 
+#[cfg(target_os = "macos")]
 struct OutputIvars {
     shared: std::sync::Arc<RecShared>,
 }
 
+#[cfg(target_os = "macos")]
 define_class!(
     // SAFETY: NSObject 无子类化约束；本对象不实现 Drop（Retained 归 SCStream 与
     // ScreenRecorder 双方持有，正常引用计数释放）。
@@ -946,6 +973,7 @@ define_class!(
     }
 );
 
+#[cfg(target_os = "macos")]
 impl HawkRecordOutput {
     fn new(shared: std::sync::Arc<RecShared>) -> Retained<Self> {
         // alloc → set_ivars → 父类 init（define_class 的 ivars 初始化契约，同 pin.rs）。
@@ -1102,6 +1130,7 @@ impl HawkRecordOutput {
 /// ——append_video 对它同样静默跳过），跳过本次抽帧（不 disable，下次节拍继续）；
 /// lock/基址/降采样类真故障才禁用通道（绝不触碰会话 error——MP4 Failed-gate 不被
 /// GIF 侧毒化的 plan 硬要求落点）。
+#[cfg(target_os = "macos")]
 fn tap_gif_lane(lane: &GifLane, sb: &CMSampleBuffer, shifted: f64) {
     if !lane.tap_due(shifted) {
         return;
@@ -1119,6 +1148,7 @@ fn tap_gif_lane(lane: &GifLane, sb: &CMSampleBuffer, shifted: f64) {
 }
 
 /// 单帧抽取结果（tap_gif_lane 的处置依据，见函数注）。
+#[cfg(target_os = "macos")]
 enum GifTap {
     Frame(GifFrame),
     /// 样本无 image buffer（SCStream 良性形态，非通道故障）。
@@ -1134,6 +1164,7 @@ enum GifTap {
 /// SAFETY: 基址指针只在锁定窗口内解引用，长度 = bytesPerRow × height（CoreVideo
 /// 契约保证 chunky BGRA 缓冲的可达范围）；非 planar 32BGRA 由本管线的
 /// SCStreamConfiguration.pixelFormat 固定。
+#[cfg(target_os = "macos")]
 unsafe fn sample_gif_frame(sb: &CMSampleBuffer, pts: f64) -> GifTap {
     use objc2_core_video::{
         CVPixelBuffer, CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow,
@@ -1184,11 +1215,13 @@ unsafe fn sample_gif_frame(sb: &CMSampleBuffer, pts: f64) -> GifTap {
 /// 回调队列 = 自建串行 dispatch 队列（CameraSession 持有），与 SCStream 的视频
 /// 回调队列互不相干；合成发生在 SCStream 帧回调线程，仅经 [`PipLane::latest_camera_buffer`]
 /// 短暂持锁 clone Retained（亚微秒），相机回调与合成线程无锁循环。
+#[cfg(target_os = "macos")]
 struct PipOutputIvars {
     latest: std::sync::Arc<std::sync::Mutex<Option<CFRetained<CVPixelBuffer>>>>,
     frames: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
+#[cfg(target_os = "macos")]
 define_class!(
     // SAFETY: NSObject 无子类化约束；本对象不实现 Drop（Retained 归 CameraSession
     // 持有，AVCaptureSession 对 output 不持强引用——delegate 由我方Retained保活）。
@@ -1221,6 +1254,7 @@ define_class!(
     }
 );
 
+#[cfg(target_os = "macos")]
 impl HawkPipOutput {
     fn new(
         latest: std::sync::Arc<std::sync::Mutex<Option<CFRetained<CVPixelBuffer>>>>,
@@ -1234,6 +1268,7 @@ impl HawkPipOutput {
 
 /// 一路已运行的相机采集会话（AVCaptureSession + 默认视频设备 + BGRA VideoDataOutput）。
 /// Drop = stopRunning（命令线程调用——生产路径为 async 命令线程，非主线程契约满足）。
+#[cfg(target_os = "macos")]
 struct CameraSession {
     session: Retained<AVCaptureSession>,
     /// 委托回调队列（struct 持有保活——AVCapture 只持队列裸指针，队列先死 = 回调
@@ -1244,6 +1279,7 @@ struct CameraSession {
     latest: std::sync::Arc<std::sync::Mutex<Option<CFRetained<CVPixelBuffer>>>>,
 }
 
+#[cfg(target_os = "macos")]
 impl CameraSession {
     /// 启动相机采集（阻塞至 startRunning 完成，~百 ms-1s 级；调用方为 async 命令
     /// 线程 / 测试线程，不卡主线程）。
@@ -1343,6 +1379,7 @@ impl CameraSession {
     }
 }
 
+#[cfg(target_os = "macos")]
 impl Drop for CameraSession {
     fn drop(&mut self) {
         self.stop();
@@ -1355,6 +1392,7 @@ impl Drop for CameraSession {
 /// 触碰；`camera` 锁只被命令线程（启停会话）触碰。视频回调侧持 PipLane 锁**期间
 /// 不拿其他锁**（clone Retained 即出锁）——锁序恒为 会话锁 → pip 状态锁（回调侧）
 /// 或仅 pip 状态锁（命令侧），无环。
+#[cfg(target_os = "macos")]
 pub struct PipLane {
     state: std::sync::Mutex<PipState>,
     camera: std::sync::Mutex<Option<CameraSession>>,
@@ -1365,12 +1403,14 @@ pub struct PipLane {
     injected: std::sync::Mutex<Option<CFRetained<CVPixelBuffer>>>,
 }
 
+#[cfg(target_os = "macos")]
 impl Default for PipLane {
     fn default() -> Self {
         Self::new()
     }
 }
 
+#[cfg(target_os = "macos")]
 impl PipLane {
     pub fn new() -> Self {
         Self {
@@ -1513,7 +1553,9 @@ impl PipLane {
 // Apple 文档明示线程安全；槽位读写全部经 Mutex 串行化（相机回调写 / 合成读不并发）。
 // CFRetained<CVBuffer> 的非 Send 是绑定层的保守默认，与 RecShared 的手工 Send 同款
 // 裁定（objc2 对 ObjC/CF 对象不做全局线程安全断言）。
+#[cfg(target_os = "macos")]
 unsafe impl Send for PipLane {}
+#[cfg(target_os = "macos")]
 unsafe impl Sync for PipLane {}
 
 // ---------------------------------------------------------------------------
@@ -1523,6 +1565,7 @@ unsafe impl Sync for PipLane {}
 /// 降级留痕限频（评审清单④）：合成降级路径按帧触发（30fps）——持续降级（如相机
 /// 被系统回收）会刷屏 stderr。限频 **5s 一条**（毫秒挂钟，Relaxed 即可：视频回调
 /// 单串行队列，原子只防多会话并发时的重复打印，丢一次打印无语义损失）。
+#[cfg(target_os = "macos")]
 fn pip_warn_limited(msg: &str) {
     use std::sync::atomic::{AtomicU64, Ordering};
     static LAST_WARN_MS: AtomicU64 = AtomicU64::new(0);
@@ -1543,6 +1586,7 @@ fn pip_warn_limited(msg: &str) {
 }
 
 /// N3 PiP 合成结果（append_video 的处置依据）。
+#[cfg(target_os = "macos")]
 enum PipComposite {
     /// 直通：PiP 关 / 相机帧缺席 / 几何退化——原样 append 主画面帧（plan：相机
     /// 帧缺席 → 无 PiP 该帧，绝不 stall writer）。
@@ -1565,6 +1609,7 @@ enum PipComposite {
 /// SAFETY: 三块缓冲的基址指针只在各自锁定窗口内解引用；长度 = bytesPerRow ×
 /// height（CoreVideo 契约保证 chunky BGRA 的可达范围；非 planar 32BGRA 由本管线
 /// 两路配置固定——SCStream pixelFormat 与相机 videoSettings）。
+#[cfg(target_os = "macos")]
 unsafe fn pip_composite_frame(lane: &PipLane, main: &CVPixelBuffer, scale: f64) -> PipComposite {
     use objc2_core_video::{
         CVPixelBufferCreate, CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow,
@@ -1715,6 +1760,7 @@ unsafe fn pip_composite_frame(lane: &PipLane, main: &CVPixelBuffer, scale: f64) 
 
 /// 运行中的录屏器：`start` → `pause`/`resume`（幂等）→ `stop`（阻塞收尾）。
 /// app 层持 `Mutex<Option<ScreenRecorder>>`。
+#[cfg(target_os = "macos")]
 pub struct ScreenRecorder {
     shared: std::sync::Arc<RecShared>,
     // SCStream 对 output 对象持强引用；本侧 Retained 仅保证 start→stop 期间对象
@@ -1729,10 +1775,13 @@ pub struct ScreenRecorder {
 // 的跨线程控制面（start/stop 任意线程）；HawkRecordOutput 的 ivars 是 Arc<RecShared>
 // （见下），对象本身的回调全部发生在 SCStream 派发的队列上。共享态 RecShared 的
 // 可变字段（RecSession）只在 Mutex 持锁路径上触碰，phase 是 AtomicU8。
+#[cfg(target_os = "macos")]
 unsafe impl Send for RecShared {}
+#[cfg(target_os = "macos")]
 unsafe impl Send for ScreenRecorder {}
 
 /// 显示器挑选策略（N1 从硬编码「主显示器优先，首个兜底」参数化）。
+#[cfg(target_os = "macos")]
 enum DisplayPick {
     /// 全屏录制（既有语义）：主显示器优先，缺失时首个可用屏兜底。
     Main,
@@ -1741,6 +1790,7 @@ enum DisplayPick {
     ById(u32),
 }
 
+#[cfg(target_os = "macos")]
 impl ScreenRecorder {
     /// 启动全屏（主显示器）录制：SCShareableContent 枚举 → 主显示器 filter →
     /// SCStream（视频 BGRA@30fps + 系统声 48k/2ch）→ AVAssetWriter（h264+AAC → MP4）。
@@ -2227,6 +2277,7 @@ impl ScreenRecorder {
 // —— macOS 侧构造辅助 ——
 
 /// getShareableContent 同步收口（completion handler → channel）。
+#[cfg(target_os = "macos")]
 fn get_shareable_content() -> Result<Retained<SCShareableContent>, String> {
     let (tx, rx) = std::sync::mpsc::channel::<Result<Retained<SCShareableContent>, String>>();
     let block = block2::RcBlock::new(
@@ -2258,19 +2309,23 @@ fn get_shareable_content() -> Result<Retained<SCShareableContent>, String> {
         .map_err(|_| "getShareableContent 回调超时".to_string())?
 }
 
+#[cfg(target_os = "macos")]
 type SettingsValue = Retained<objc2::runtime::AnyObject>;
 
+#[cfg(target_os = "macos")]
 fn string_const(s: Option<&'static NSString>) -> SettingsValue {
     // SAFETY: 常量为系统初始化的非空静态；NSString → AnyObject 向上转型静态成立。
     let s = s.expect("AVFoundation 常量缺失");
     unsafe { Retained::cast_unchecked::<objc2::runtime::AnyObject>(s.to_owned()) }
 }
 
+#[cfg(target_os = "macos")]
 fn number_value(n: i64) -> SettingsValue {
     // SAFETY: 同上（NSNumber → AnyObject）。
     unsafe { Retained::cast_unchecked::<objc2::runtime::AnyObject>(NSNumber::numberWithLongLong(n)) }
 }
 
+#[cfg(target_os = "macos")]
 fn settings_dict(
     entries: &[(&str, SettingsValue)],
 ) -> Retained<NSDictionary<NSString, objc2::runtime::AnyObject>> {
@@ -2279,6 +2334,173 @@ fn settings_dict(
     let value_refs: Vec<&objc2::runtime::AnyObject> =
         entries.iter().map(|(_, v)| &**v).collect();
     NSDictionary::from_slices(&key_refs, &value_refs)
+}
+
+// ---------------------------------------------------------------------------
+// 非 macOS 平台桩（M4 P0 跨平台编译重构）
+//
+// macOS 之外没有 ScreenCaptureKit / AVFoundation / AppKit 绑定栈，**平台能力
+// 不存在**。本节提供**同名同签名**的最小 API 面，使依赖方（app crate）在
+// Linux/Windows 上照常编译：
+//   - 纯逻辑（暂停平移时钟、单调门、输出路径、MP4 解析、GIF 降采样、PiP 几何）
+//     跨平台保留（上方各节未受本门控影响，仍可在非 macOS 上跑单测）；
+//   - 平台能力（录屏、画中画、显示器查询）在此**明确拒绝**（Err / 空值），
+//     绝不静默假装成功——「该平台暂不支持」是可读的能力缺席信号。
+//
+// 桩与 macOS 实现的差异（有意为之，且仅此一处）：
+//   - PipLane 保留**状态语义**（参数校验 + 部分更新），相机启停缺席
+//     （visible=true → Err）；macOS 侧相机路径见 [`PipLane::update`]。
+//   - ScreenRecorder 的四个启动入口一律 Err；stop 亦 Err（无会话可收）。
+// ---------------------------------------------------------------------------
+
+/// 能力缺席的统一文案（跨平台降级信号：明确、可读、不静默）。
+#[cfg(not(target_os = "macos"))]
+const UNSUPPORTED: &str = "该平台暂不支持（录屏能力当前仅 macOS 提供）";
+
+/// 主显示器 id：非 macOS 无显示器查询能力 → 返回 0（无效 id；调用方应先判能力）。
+#[cfg(not(target_os = "macos"))]
+pub fn main_display_id() -> u32 {
+    0
+}
+
+/// 画中画共享道（非 macOS 桩）：保留**状态语义**（参数校验 + 状态部分更新），
+/// 相机路径缺席——visible=true 明确 Err（LADDER 纪律：PiP 缺席 = 静默缺席，
+/// 绝不阻塞录制主链路）。
+#[cfg(not(target_os = "macos"))]
+pub struct PipLane {
+    state: std::sync::Mutex<PipState>,
+}
+
+#[cfg(not(target_os = "macos"))]
+impl Default for PipLane {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+impl PipLane {
+    pub fn new() -> Self {
+        Self { state: std::sync::Mutex::new(PipState::default()) }
+    }
+
+    /// 状态快照（与 macOS 语义一致）。
+    pub fn state(&self) -> PipState {
+        *self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// 部分更新：校验口径与 macOS 一致（非法整包拒绝、状态零变化）；相机启停
+    /// 缺席——visible=true 明确 Err。
+    pub fn update(&self, patch: PipUpdate) -> Result<(), String> {
+        if let Some(Some(x)) = patch.x {
+            if !x.is_finite() {
+                return Err(format!("画中画 x 坐标非法: {x}"));
+            }
+        }
+        if let Some(Some(y)) = patch.y {
+            if !y.is_finite() {
+                return Err(format!("画中画 y 坐标非法: {y}"));
+            }
+        }
+        if let Some(size) = patch.size {
+            if !size.is_finite() || size <= 0.0 {
+                return Err(format!("画中画尺寸非法: {size}"));
+            }
+        }
+        if patch.visible == Some(true) {
+            return Err(UNSUPPORTED.to_string());
+        }
+        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(x) = patch.x {
+            st.x = x;
+        }
+        if let Some(y) = patch.y {
+            st.y = y;
+        }
+        if let Some(size) = patch.size {
+            st.size = size;
+        }
+        if patch.visible == Some(false) {
+            st.visible = false;
+        }
+        Ok(())
+    }
+
+    /// 相机帧计数：无相机 → 0。
+    pub fn camera_frames(&self) -> u64 {
+        0
+    }
+
+    /// 相机是否在采：无相机 → false。
+    pub fn camera_running(&self) -> bool {
+        false
+    }
+}
+
+/// 录屏器（非 macOS 桩）：无录屏能力 → 启动入口一律 Err（明确拒绝，不静默）。
+#[cfg(not(target_os = "macos"))]
+pub struct ScreenRecorder;
+
+#[cfg(not(target_os = "macos"))]
+impl ScreenRecorder {
+    /// 启动全屏录制（macOS 语义见同名实现）：非 macOS 明确拒绝。
+    pub fn start(
+        _output_path: PathBuf,
+        _pip_lane: Option<std::sync::Arc<PipLane>>,
+    ) -> Result<ScreenRecorder, String> {
+        Err(UNSUPPORTED.to_string())
+    }
+
+    /// 全屏 + GIF 旁路（非 macOS 明确拒绝）。
+    pub fn start_gif(
+        _output_path: PathBuf,
+        _gif_lane: std::sync::Arc<GifLane>,
+        _pip_lane: Option<std::sync::Arc<PipLane>>,
+    ) -> Result<ScreenRecorder, String> {
+        Err(UNSUPPORTED.to_string())
+    }
+
+    /// 区域录制（非 macOS 明确拒绝）。
+    pub fn start_region(
+        _output_path: PathBuf,
+        _display_id: u32,
+        _region: LogicalRect,
+        _pip_lane: Option<std::sync::Arc<PipLane>>,
+    ) -> Result<ScreenRecorder, String> {
+        Err(UNSUPPORTED.to_string())
+    }
+
+    /// 区域 + GIF 旁路（非 macOS 明确拒绝）。
+    pub fn start_region_gif(
+        _output_path: PathBuf,
+        _display_id: u32,
+        _region: LogicalRect,
+        _gif_lane: std::sync::Arc<GifLane>,
+        _pip_lane: Option<std::sync::Arc<PipLane>>,
+    ) -> Result<ScreenRecorder, String> {
+        Err(UNSUPPORTED.to_string())
+    }
+
+    /// 暂停：无非 macOS 会话，空操作。
+    pub fn pause(&self) {}
+
+    /// 恢复：无非 macOS 会话，空操作。
+    pub fn resume(&self) {}
+
+    /// 会话信息：无会话 → None。
+    pub fn info(&self) -> Option<RecordingInfo> {
+        None
+    }
+
+    /// 管线错误：无会话 → None。
+    pub fn take_error(&self) -> Option<String> {
+        None
+    }
+
+    /// 停止：无非 macOS 会话可收 → 明确 Err。
+    pub fn stop(&self) -> Result<RecordingInfo, String> {
+        Err(UNSUPPORTED.to_string())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2563,6 +2785,7 @@ mod tests {
 
     /// 录制固定时长 → 断言 MP4 ftyp 魔数 + mvhd 时长 ≈ 录制时长。
     /// HAWKSNAP_RECORD_SECS 控制时长（soak 脚本注入 3600 做 72h 分段）。
+#[cfg(target_os = "macos")]
     #[test]
     #[ignore = "需要 macOS 屏幕录制权限 + 真实显示器；cargo test -p hawksnap-platform-mac -- --ignored 运行"]
     fn real_recording_produces_valid_mp4() {
@@ -2620,6 +2843,7 @@ mod tests {
 
     /// 暂停/恢复时间线检查：录 2s → 暂停 2s → 恢复 2s → 停止，mvhd 时长应 ≈4s
     /// （暂停平移生效、无空洞）——任务验收口径 ±300ms，此处放 ±0.6s 容忍 CI 波动。
+#[cfg(target_os = "macos")]
     #[test]
     #[ignore = "需要 macOS 屏幕录制权限 + 真实显示器；cargo test -p hawksnap-platform-mac -- --ignored 运行"]
     fn real_pause_resume_timeline_gapless() {
@@ -2645,6 +2869,7 @@ mod tests {
     /// G5 soak 驱动段：HAWKSNAP_RECORD_SECS（默认 5，soak 注入 3600）单段录制 +
     /// 自采样 RSS/CPU → CSV 追加（脚本见 scripts/soak-record.sh）。同进程跑满全程
     /// （72h = 本测试单次运行 72h），内存增长 <10% 由脚本对 CSV 断言。
+#[cfg(target_os = "macos")]
     #[test]
     #[ignore = "soak 专用；scripts/soak-record.sh 驱动"]
     fn soak_segment_records_and_samples() {
@@ -2711,6 +2936,7 @@ mod tests {
 
     // —— N1 区域录制：流参数纯数学（坐标裁定见 region_stream_params 注）——
 
+#[cfg(target_os = "macos")]
     #[test]
     fn region_params_region_at_2x() {
         // 2x Retina：800×600 逻辑选区 → sourceRect 原样（points 直传，不乘 scale），
@@ -2728,6 +2954,7 @@ mod tests {
         assert_eq!(p.out_h, 1200);
     }
 
+#[cfg(target_os = "macos")]
     #[test]
     fn region_params_full_display_at_1x() {
         // 1x 外接屏：整屏快捷确认（Enter 无选区）= 选区即全屏 → sourceRect = 全边界，
@@ -2742,6 +2969,7 @@ mod tests {
         assert_eq!((p.out_w, p.out_h), (1920, 1080));
     }
 
+#[cfg(target_os = "macos")]
     #[test]
     fn region_params_clamp_out_of_bounds_selection() {
         // 越界选区（理论上前端已夹取；防御复算）：负原点 + 超界尺寸 → 夹进显示边界。
@@ -2757,6 +2985,7 @@ mod tests {
         assert_eq!((p.out_w, p.out_h), (1920, 1080));
     }
 
+#[cfg(target_os = "macos")]
     #[test]
     fn region_params_fractional_rect_rounds_even() {
         // 分数坐标（HiDPI 下 clientX 可为小数）：输出像素 = round(points×scale) 后
@@ -2771,6 +3000,7 @@ mod tests {
         assert_eq!(p.source.origin.x, 428.75, "sourceRect 保留原值（points 直传）");
     }
 
+#[cfg(target_os = "macos")]
     #[test]
     fn region_params_rejects_degenerate_regions() {
         // 完全出界（夹取后退化）与零尺寸 → Err（拒绝启动，不静默录空）。
@@ -2852,6 +3082,7 @@ mod tests {
     // —— N1 区域录制端到端（#[ignore]，需屏幕录制权限，开发机直跑）——
 
     /// CPU 采样（测试内 helper）：ps %cpu 瞬时值（与 soak_record 同款口径）。
+#[cfg(target_os = "macos")]
     fn sample_cpu_percent(pid: u32) -> Option<f64> {
         let out = std::process::Command::new("ps")
             .args(["-o", "%cpu=", "-p", &pid.to_string()])
@@ -2866,6 +3097,7 @@ mod tests {
     ///   （sourceRect 生效；全屏路径同断言会得显示器物理像素）；
     /// ③ mvhd 时长 ≈ 3s；④ CPU 采样均值 < 8%（F7 预算；plan 预期面积裁剪后
     ///   显著低于全屏，实测值打印进报告）。
+#[cfg(target_os = "macos")]
     #[test]
     #[ignore = "需要 macOS 屏幕录制权限 + 真实显示器；cargo test -p hawksnap-platform-mac -- --ignored real_region 运行"]
     fn real_region_recording_produces_region_dims_and_low_cpu() {
@@ -3165,6 +3397,7 @@ mod tests {
     // —— N3 画中画：CVPixelBuffer 级合成（CoreVideo 直调，无权限需求） ——
 
     /// 合成一张 BGRA CVPixelBuffer 并填充。
+#[cfg(target_os = "macos")]
     unsafe fn make_bgra_buffer(w: usize, h: usize, fill: [u8; 4]) -> CFRetained<CVPixelBuffer> {
         use objc2_core_video::{
             CVPixelBufferCreate, CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow,
@@ -3199,6 +3432,7 @@ mod tests {
     }
 
     /// 读回 CVPixelBuffer 一个像素（锁定→读→解锁）。
+#[cfg(target_os = "macos")]
     unsafe fn read_px(buf: &CVPixelBuffer, i: usize, j: usize) -> [u8; 4] {
         use objc2_core_video::{
             CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow,
@@ -3216,6 +3450,7 @@ mod tests {
         out
     }
 
+#[cfg(target_os = "macos")]
     #[test]
     fn pip_composite_composes_main_camera_and_border_on_real_buffers() {
         // 64×64 灰主帧 + 32×32 红相机帧 → 真实 CVPixelBuffer 合成（分配路径 =
@@ -3240,6 +3475,7 @@ mod tests {
         assert_eq!(unsafe { read_px(&dst, 2, 2) }, [0x40, 0x40, 0x40, 0xFF], "圆外 = 主画面");
     }
 
+#[cfg(target_os = "macos")]
     #[test]
     fn pip_composite_plain_when_hidden_or_no_camera_frame() {
         let main = unsafe { make_bgra_buffer(32, 32, [1, 2, 3, 255]) };

@@ -16,6 +16,11 @@ test-util = []
 hawksnap-core.workspace = true
 xcap = "0.4"
 image.workspace = true
+# chrono 是**跨平台**纯 Rust 依赖（非 macOS 专属）：record.rs 的输出路径工具
+# `recording_output_path` 的签名用到 DateTime<Local>，该函数跨平台保留（其余
+# 平台照常可用），故 chrono 不能进 macOS 专属段（否则非 macOS 下签名无法解析）。
+# 与 app 层同版，不引入新版本解析。
+chrono = "0.4"
 
 # Task 5 AX 悬停探测：AX 裸 extern 需要的 CF 类型托管（core-foundation）与
 # CGPoint/CGSize 几何类型（core-graphics）。两 crate 均已在依赖树（app Task 4、xcap），
@@ -79,4 +84,4 @@ objc2-core-video = { version = "0.3", features = ["CVPixelBuffer", "CVImageBuffe
 block2 = "0.6"
 dispatch2 = "0.3"
 # M6：输出文件名时间戳（%Y-%m-%d-%H%M%S）+ soak 采样 CSV 行时间；与 app 层同版。
-chrono = "0.4"
+# chrono 已上移至 [dependencies]（跨平台纯 Rust，见上注）。

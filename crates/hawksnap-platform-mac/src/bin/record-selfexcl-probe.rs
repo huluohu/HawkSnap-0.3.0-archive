@@ -10,12 +10,24 @@
 //! 经 `tests/real_record_selfexcl.rs`（#[ignore]）以子进程方式纳入测试口径。
 //! NSWindow/NSApplication 均是 MainThreadOnly——探针必须在主线程跑（bin 的
 //! main 即主线程；测试不能直接跑，测试线程非主线程，故经子进程）。
+//! 非 macOS 平台：探针的运行时依赖（AppKit 窗口服务 / ScreenCaptureKit）不存在，
+//! 直接跳过（打印说明 + 正常退出）——保证 `cargo test --workspace` 在非 macOS
+//! 上照常构建本 bin（探针的集成测试经子进程调用它）。
+#[cfg(not(target_os = "macos"))]
+fn main() {
+    eprintln!("SKIP: 该探针仅 macOS 可用（当前平台无 AppKit/ScreenCaptureKit）");
+}
 
+#[cfg(target_os = "macos")]
 use hawksnap_platform_mac::record::{ScreenRecorder, recording_output_path};
+#[cfg(target_os = "macos")]
 use objc2::{MainThreadMarker, MainThreadOnly};
+#[cfg(target_os = "macos")]
 use objc2_app_kit::{NSApplication, NSBackingStoreType, NSWindow, NSWindowStyleMask};
+#[cfg(target_os = "macos")]
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 
+#[cfg(target_os = "macos")]
 fn main() {
     // 1. 主线程（MainThreadOnly 契约）+ AppKit 连接（窗口服务注册的前提）。
     let mtm = MainThreadMarker::new().expect("探针必须在主线程运行");

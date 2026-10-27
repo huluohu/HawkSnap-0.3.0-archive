@@ -27,6 +27,9 @@
 //! 与截图主链路同门槛：**屏幕录制权限**。未授权时 macOS 14+ 静默返回壁纸/空图
 //! ——调用方（app 层）先用 `permissions::screen_recording_prechecked()` 预检。
 
+// M4 P0：非 macOS 平台无 CG 抓取路径——c_void 仅供 macOS 实现内的裸 extern
+// 使用，故随实现同门控（否则非 macOS 构建报 unused import）。
+#[cfg(target_os = "macos")]
 use std::os::raw::c_void;
 
 /// 全局逻辑矩形（Quartz points，y 轴向下）。

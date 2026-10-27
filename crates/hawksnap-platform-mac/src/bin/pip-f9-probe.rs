@@ -13,33 +13,53 @@
 //!    「槽 → 合成 → writer → MP4」全程（诚实边界，任务报告记录）。
 //!
 //! 运行（需屏幕录制权限）：`cargo run -p hawksnap-platform-mac --bin pip-f9-probe`
+//! 非 macOS 平台：探针的运行时依赖（AppKit 窗口服务 / ScreenCaptureKit）不存在，
+//! 直接跳过（打印说明 + 正常退出）——保证 `cargo test --workspace` 在非 macOS
+//! 上照常构建本 bin（探针的集成测试经子进程调用它）。
+#[cfg(not(target_os = "macos"))]
+fn main() {
+    eprintln!("SKIP: 该探针仅 macOS 可用（当前平台无 AppKit/ScreenCaptureKit）");
+}
 
+#[cfg(target_os = "macos")]
 use hawksnap_platform_mac::record::{
     display_pixels_wide, main_display_id, mp4_duration_secs, mp4_track_dims,
     mp4_video_sample_deltas, pip_rect_px, recording_output_path, LogicalRect, PipLane,
     PipState, PipUpdate, ScreenRecorder,
 };
+#[cfg(target_os = "macos")]
 use objc2::{MainThreadMarker, MainThreadOnly};
+#[cfg(target_os = "macos")]
 use objc2_app_kit::{NSApplication, NSBackingStoreType, NSColor, NSWindow, NSWindowStyleMask};
 // CoreVideo 直调仅注入模式（test-util）使用——门控与 make_synthetic_frame 同步。
 #[cfg(feature = "test-util")]
+#[cfg(target_os = "macos")]
 use objc2_core_foundation::CFRetained;
 #[cfg(feature = "test-util")]
+#[cfg(target_os = "macos")]
 use objc2_core_video::{
     kCVPixelFormatType_32BGRA, CVPixelBuffer, CVPixelBufferCreate, CVPixelBufferGetBaseAddress,
     CVPixelBufferGetBytesPerRow, CVPixelBufferGetHeight, CVPixelBufferGetWidth,
     CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
 };
+#[cfg(target_os = "macos")]
 use objc2_foundation::{NSDate, NSDefaultRunLoopMode, NSPoint, NSRect, NSRunLoop, NSSize};
+#[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "macos")]
 use std::sync::{mpsc, Arc};
+#[cfg(target_os = "macos")]
 use std::time::{Duration, Instant};
 
 /// 区域录制选区（800×600 @ (50,50)，与 N1 端到端同款）。
+#[cfg(target_os = "macos")]
 const REGION: LogicalRect = LogicalRect { x: 50.0, y: 50.0, w: 800.0, h: 600.0 };
+#[cfg(target_os = "macos")]
 const NOPIP_SECS: u64 = 5;
+#[cfg(target_os = "macos")]
 const PIP_SECS: u64 = 10;
 
+#[cfg(target_os = "macos")]
 fn main() {
     let mtm = MainThreadMarker::new().expect("探针必须在主线程运行");
     let _app = NSApplication::sharedApplication(mtm);
@@ -214,6 +234,7 @@ fn main() {
 
 /// 主线程动窗 + 录制交替泵：录制闭包在独立线程跑，动窗泵在主线程 60Hz 运行
 /// （窗口移动 → 窗口服务器重绘 → SCStream 内容变化逐帧交付），闭包返回即停泵。
+#[cfg(target_os = "macos")]
 fn run_motion_loop<R: Send + 'static>(
     window: &NSWindow,
     f: impl FnOnce() -> R + Send + 'static,
@@ -250,6 +271,7 @@ fn run_motion_loop<R: Send + 'static>(
 /// 注入模式：30fps 合成动画帧（7 色轮转 + 游走白方块）→ 相机槽；线程在
 /// PIP_SECS+5s 后自停（录制收尾后无消费方，不留残）。
 #[cfg(feature = "test-util")]
+#[cfg(target_os = "macos")]
 fn start_injector(lane: Arc<PipLane>) {
     std::thread::spawn(move || {
         let t0 = Instant::now();
@@ -271,6 +293,7 @@ fn start_injector(lane: Arc<PipLane>) {
 
 /// 合成一帧 BGRA（移动方块 + 色移——帧间必变，运动熵源）。
 #[cfg(feature = "test-util")]
+#[cfg(target_os = "macos")]
 fn make_synthetic_frame(w: usize, h: usize, n: u64) -> Option<CFRetained<CVPixelBuffer>> {
     unsafe {
         let mut raw: *mut CVPixelBuffer = std::ptr::null_mut();
@@ -327,6 +350,7 @@ fn make_synthetic_frame(w: usize, h: usize, n: u64) -> Option<CFRetained<CVPixel
 }
 
 /// 主显示器缩放（物理/逻辑）——与 begin() 同一 CG 口径。
+#[cfg(target_os = "macos")]
 fn display_scale() -> f64 {
     let id = main_display_id();
     let (pw, bounds) = (display_pixels_wide(id), hawksnap_platform_mac::record::display_bounds(id));
@@ -337,10 +361,12 @@ fn display_scale() -> f64 {
     }
 }
 
+#[cfg(target_os = "macos")]
 type CpuSampler = Arc<(AtomicBool, std::sync::Mutex<Vec<f64>>)>;
 
 /// CPU 采样线程（N1 real_region 同款 ps %cpu 口径）：500ms 一次入共享槽；
 /// stop_cpu_sampler 置停 + 取均值。
+#[cfg(target_os = "macos")]
 fn start_cpu_sampler(pid: u32) -> CpuSampler {
     let shared: CpuSampler = Arc::new((AtomicBool::new(false), std::sync::Mutex::new(Vec::new())));
     let s2 = shared.clone();
@@ -355,6 +381,7 @@ fn start_cpu_sampler(pid: u32) -> CpuSampler {
     shared
 }
 
+#[cfg(target_os = "macos")]
 fn stop_cpu_sampler(sampler: CpuSampler) -> f64 {
     sampler.0.store(true, Ordering::Relaxed);
     // 等一个采样周期，保证末段样本落账（500ms 周期 + 余量）。
@@ -367,6 +394,7 @@ fn stop_cpu_sampler(sampler: CpuSampler) -> f64 {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn sample_cpu(pid: u32) -> Option<f64> {
     let out = std::process::Command::new("ps")
         .args(["-o", "%cpu=", "-p", &pid.to_string()])
@@ -377,6 +405,7 @@ fn sample_cpu(pid: u32) -> Option<f64> {
 
 /// 逐帧时长统计：主节奏（中位数）+ 大间隙占比（>1.8×median = 至少缺 1 帧，
 /// 管线掉帧指纹）+ ±10% 带内占比（信息量）+ 直方图（证据留痕）。
+#[cfg(target_os = "macos")]
 struct CadenceStats {
     median: f64,
     gap_pct: f64,
@@ -384,6 +413,7 @@ struct CadenceStats {
     histogram: String,
 }
 
+#[cfg(target_os = "macos")]
 fn cadence_stats(deltas: &[f64]) -> CadenceStats {
     if deltas.is_empty() {
         return CadenceStats { median: 0.0, gap_pct: 0.0, inband_pct: 0.0, histogram: "n/a".into() };

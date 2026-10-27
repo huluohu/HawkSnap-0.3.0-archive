@@ -223,13 +223,17 @@ pub async fn hide_overlays_after_annotate(app: AppHandle) -> Result<(), String> 
     crate::overlay::hide_all_overlays(&app)
 }
 
-/// 标注临时 PNG 落盘（M2 Task M3，纯函数可测）：`$TMPDIR/hawksnap-annotate-{ts}.png`。
-/// 毫秒时间戳命名（同轮多次标注不互撞）；文件无人主动清理（临时目录系统管理，编辑器
+/// 标注临时 PNG 落盘（M2 Task M3，纯函数可测）：`$TMPDIR/hawksnap-annotate-{ts}-{seq}.png`。
+/// 命名必须**保证**不互撞：毫秒时间戳单独用并不够——同一毫秒内的两次标注（小图 +
+/// 快机器）会撞名，后写覆盖先写（编辑器可能拿到别轮的图）。故追加进程内单调序号
+/// （`fetch_add` 原子，跨线程唯一）；文件无人主动清理（临时目录系统管理，编辑器
 /// 打开期间必须存活，保存后由用户在编辑器语义内处置）。
 fn write_annotate_png(rgba: &[u8], w: u32, h: u32) -> Result<std::path::PathBuf, String> {
     let png = rgba_to_png(rgba, w, h).map_err(|e| e.to_string())?;
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!(
-        "hawksnap-annotate-{}.png",
+        "hawksnap-annotate-{}-{seq}.png",
         chrono::Local::now().timestamp_millis()
     ));
     std::fs::write(&path, &png).map_err(|e| format!("临时文件写入失败: {e}"))?;
