@@ -42,6 +42,6 @@ open site/docs/index.html
 ## 约束（改站点时保持）
 
 - **零外部资源**：不引任何 CDN / Google Fonts / 外链图片；字体只用系统字体栈；
-- 下载链接一律指向 <https://github.com/guxiaolong/HawkSnap/releases/latest>（不硬编码版本号）；
+- 下载链接一律指向 <https://github.com/huluohu/HawkSnap/releases/latest>（不硬编码版本号）；
 - 平台支持、隐私与许可文案与仓库 README / LICENSE 口径一致（如实标注「未适配、未实测」）；
 - 主题：暗色默认，`prefers-color-scheme` + 手动切换，`localStorage["hawksnap-theme"]` 持久化。
