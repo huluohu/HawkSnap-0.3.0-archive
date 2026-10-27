@@ -17,6 +17,7 @@
 # 发布仍为 **macOS-only**：跨平台编译 ≠ 跨平台分发（Windows/Linux 的打包、
 # 签名与 updater feed 口径另案裁定，见 release job 注）。
 name: CI
+# 2026-10-28：Actions 解析状态卡死（startup_failure 0 jobs）——本行强制 GitHub 重新解析
 
 on:
   push:
