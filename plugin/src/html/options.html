@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>HawkSnap 截图 · 设置</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        max-width: 720px;
+        margin: 32px auto;
+        padding: 0 24px;
+        background: #0c1624;
+        color: #e9eef5;
+        font: 14px/1.6 system-ui, -apple-system, "PingFang SC", sans-serif;
+      }
+      h1 {
+        font-size: 18px;
+        color: #ffb020;
+      }
+      h2 {
+        font-size: 15px;
+        border-bottom: 1px solid #22405f;
+        padding-bottom: 6px;
+      }
+      code {
+        padding: 1px 6px;
+        border: 1px solid #22405f;
+        border-radius: 5px;
+        background: #101d30;
+        font-family: ui-monospace, Menlo, monospace;
+        font-size: 13px;
+        word-break: break-all;
+      }
+      .row {
+        margin: 10px 0;
+      }
+      button {
+        padding: 6px 14px;
+        border: 1px solid #22405f;
+        border-radius: 7px;
+        background: #101d30;
+        color: #e9eef5;
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: #ffb020;
+      }
+      #probeResult {
+        margin-left: 12px;
+      }
+      .ok {
+        color: #8ce99a;
+      }
+      .bad {
+        color: #ffc9c9;
+      }
+      .muted {
+        color: #8fa3ba;
+        font-size: 13px;
+      }
+      ol {
+        padding-left: 20px;
+      }
+      li {
+        margin: 6px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>HawkSnap 截图 · 设置</h1>
+
+    <h2>扩展 ID（注册 Native Messaging 宿主时需要）</h2>
+    <div class="row">
+      <code id="extId"></code>
+      <button id="copyId" style="margin-left: 8px">复制 allowed_origins 值</button>
+    </div>
+    <p class="muted">
+      运行桌面端的 <code>scripts/install-native-host.sh --ext-id &lt;上面的ID&gt;</code>，脚本会把这个 ID 写进
+      Chrome/Edge 的宿主 manifest <code>allowed_origins</code>（未列入的来源一律拒绝连接）。
+    </p>
+
+    <h2>HawkSnap 桌面端（Native Messaging 宿主）</h2>
+    <div class="row">
+      宿主名：<code id="hostName"></code>
+      <button id="probe" style="margin-left: 8px">检测桌面端链路</button>
+      <span id="probeResult" class="muted">未检测</span>
+    </div>
+    <p class="muted">
+      检测会向宿主发送一个 1×1 探测帧（只落临时目录，不进桌面端历史）。「无法启动宿主」= 未运行
+      <code>install-native-host.sh</code> 或桌面端从未启动；「等待回执超时」= 桌面端可能已退出（退出即删配置）。
+    </p>
+
+    <h2>说明</h2>
+    <ol>
+      <li>整页截图通过 chrome.debugger 完成，期间页面顶部会显示「HawkSnap 开始调试」横幅，截图结束自动消失。</li>
+      <li>「发送到桌面端」会把截图写入 HawkSnap 的历史（来源标记为 browser）；超过浏览器单消息 4 MB 上限的整页长图会自动降级为本地下载。</li>
+      <li>本扩展只在点击工具栏 / 快捷键时截取当前页面，不做任何后台采集或上报。</li>
+    </ol>
+
+    <script src="./options.js"></script>
+  </body>
+</html>

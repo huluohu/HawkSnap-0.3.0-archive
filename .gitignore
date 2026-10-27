@@ -18,3 +18,7 @@ app/src-tauri/hawksnap-np-rel-*.json
 
 # 长截图 eval 生成的 HTML 页面（脚本确定性生成，勿入库）
 scripts/scrollshot-eval/pages/
+
+# M4 P2：插件构建产物与依赖（npm run build 生成 dist → 「加载已解压的扩展程序」用；不入库）
+plugin/dist/
+plugin/node_modules/

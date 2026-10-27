@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>HawkSnap 编辑器</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        background: #0c1624;
+        color: #e9eef5;
+        font: 13px/1.5 system-ui, -apple-system, "PingFang SC", sans-serif;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-bottom: 1px solid #22405f;
+        background: #101d30;
+        flex-wrap: wrap;
+      }
+      .group {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+      }
+      .sep {
+        width: 1px;
+        height: 22px;
+        background: #22405f;
+      }
+      button.tool,
+      button.act {
+        padding: 5px 10px;
+        border: 1px solid #22405f;
+        border-radius: 6px;
+        background: transparent;
+        color: #e9eef5;
+        font: inherit;
+        cursor: pointer;
+      }
+      button.tool:hover,
+      button.act:hover {
+        background: #16263c;
+      }
+      button.tool.active {
+        border-color: #ffb020;
+        color: #ffb020;
+        background: #1a2a42;
+      }
+      button.act.primary {
+        border-color: #2f9e44;
+        color: #8ce99a;
+      }
+      button.act.desktop {
+        border-color: #ffb020;
+        color: #ffb020;
+      }
+      button:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      .swatch {
+        width: 18px;
+        height: 18px;
+        padding: 0;
+        border-radius: 50%;
+        border: 2px solid transparent;
+        cursor: pointer;
+      }
+      .swatch.active {
+        border-color: #e9eef5;
+      }
+      main {
+        flex: 1;
+        overflow: auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+      }
+      #stage {
+        position: relative;
+        line-height: 0;
+      }
+      #board {
+        max-width: 100%;
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+        touch-action: none;
+      }
+      #error {
+        max-width: 560px;
+        padding: 24px;
+        border: 1px solid #e03131;
+        border-radius: 10px;
+        background: #1a1215;
+        color: #ffc9c9;
+        white-space: pre-wrap;
+      }
+      footer {
+        padding: 6px 12px;
+        border-top: 1px solid #22405f;
+        background: #101d30;
+        color: #8fa3ba;
+        min-height: 1.5em;
+      }
+      footer .ok {
+        color: #8ce99a;
+      }
+      footer .bad {
+        color: #ffc9c9;
+      }
+    </style>
+  </head>
+  <body>
+    <header id="bar" style="display: none">
+      <div class="group" id="tools">
+        <button class="tool" data-tool="rect" title="矩形框选标注">▭ 矩形</button>
+        <button class="tool" data-tool="arrow" title="箭头">➚ 箭头</button>
+        <button class="tool" data-tool="pen" title="自由画笔">✎ 画笔</button>
+        <button class="tool" data-tool="highlighter" title="荧光笔（半透明粗线）">▨ 荧光</button>
+        <button class="tool" data-tool="text" title="点击画面插入文字">A 文字</button>
+      </div>
+      <div class="sep"></div>
+      <div class="group" id="colors">
+        <button class="swatch" data-color="#e03131" style="background: #e03131" title="红"></button>
+        <button class="swatch" data-color="#ffb020" style="background: #ffb020" title="琥珀"></button>
+        <button class="swatch" data-color="#4dabf7" style="background: #4dabf7" title="蓝"></button>
+        <button class="swatch" data-color="#f8f9fa" style="background: #f8f9fa" title="白"></button>
+      </div>
+      <div class="sep"></div>
+      <div class="group">
+        <button class="act" id="undo" title="撤销上一个标注（Ctrl/Cmd+Z）">撤销</button>
+        <button class="act" id="clear" title="清空全部标注">清空</button>
+      </div>
+      <div style="flex: 1"></div>
+      <div class="group">
+        <button class="act" id="copy" title="复制到剪贴板">复制</button>
+        <button class="act" id="download" title="下载 PNG">下载</button>
+        <button class="act desktop" id="send" title="经 Native Messaging 发送到 HawkSnap 桌面端历史">发送到桌面端</button>
+      </div>
+    </header>
+    <main>
+      <div id="stage" style="display: none"><canvas id="board"></canvas></div>
+      <div id="error" style="display: none"></div>
+    </main>
+    <footer id="status"></footer>
+    <script src="./editor.js"></script>
+  </body>
+</html>

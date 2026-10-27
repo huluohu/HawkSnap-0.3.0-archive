@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "HawkSnap 截图",
+  "version": "0.1.0",
+  "description": "整页 / 可见区 / 区域截图，标注后复制、下载，或发送到 HawkSnap 桌面端历史。",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "HawkSnap：选择截图模式",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "options_page": "options/options.html",
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+S"
+      },
+      "description": "打开 HawkSnap 捕获菜单（快捷键同样授予 activeTab）"
+    }
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "debugger",
+    "downloads",
+    "clipboardWrite",
+    "storage",
+    "offscreen",
+    "nativeMessaging"
+  ]
+}

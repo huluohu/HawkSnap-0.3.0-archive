@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        width: 216px;
+        margin: 0;
+        padding: 12px;
+        background: #0c1624;
+        color: #e9eef5;
+        font: 13px/1.5 system-ui, -apple-system, "PingFang SC", sans-serif;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: 14px;
+        font-weight: 600;
+        color: #ffb020;
+        letter-spacing: 0.5px;
+      }
+      button {
+        display: block;
+        width: 100%;
+        margin: 6px 0;
+        padding: 8px 10px;
+        border: 1px solid #22405f;
+        border-radius: 8px;
+        background: #101d30;
+        color: #e9eef5;
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: #ffb020;
+        background: #16263c;
+      }
+      button b {
+        display: block;
+        font-weight: 600;
+      }
+      button span {
+        display: block;
+        font-size: 11px;
+        color: #8fa3ba;
+      }
+      .hint {
+        margin-top: 10px;
+        font-size: 11px;
+        color: #8fa3ba;
+      }
+      kbd {
+        padding: 0 4px;
+        border: 1px solid #22405f;
+        border-radius: 4px;
+        background: #101d30;
+        font-family: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>HawkSnap 截图</h1>
+    <button id="full"><b>整页截图</b><span>滚动页面完整截取（含懒加载图）</span></button>
+    <button id="visible"><b>可见区域</b><span>当前视口画面</span></button>
+    <button id="region"><b>区域截取</b><span>拖拽框选一部分</span></button>
+    <div class="hint">快捷键 <kbd>Alt+Shift+S</kbd> 也可打开本菜单。截图完成后进入标注编辑器。</div>
+    <script src="./popup.js"></script>
+  </body>
+</html>
