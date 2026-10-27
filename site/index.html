@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="HawkSnap —— 免费纯本地的截屏工具：区域/全屏截图、智能吸附、标注、OCR、贴图、录屏、长截图、浏览器插件。像鹰一样准，一按就截。">
+  <meta name="color-scheme" content="dark light">
+  <title>HawkSnap — 像鹰一样准，一按就截</title>
+  <link rel="icon" type="image/svg+xml" href="assets/icon.svg">
+  <link rel="stylesheet" href="assets/style.css">
+  <script>
+    // 主题预置（防闪烁）：localStorage 优先，其次系统偏好，默认暗色。
+    (function () {
+      try {
+        var t = localStorage.getItem("hawksnap-theme");
+        if (t !== "light" && t !== "dark") {
+          t = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        }
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) { /* localStorage 不可用时保持默认暗色 */ }
+    })();
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到正文</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="index.html">
+        <img src="assets/icon.svg" alt="" width="28" height="28">
+        <span>HawkSnap</span>
+      </a>
+      <nav class="site-nav" aria-label="页面导航">
+        <a href="#features">功能</a>
+        <a href="#platform">平台支持</a>
+        <a href="#privacy">隐私与许可</a>
+        <a href="docs/index.html">文档</a>
+      </nav>
+      <div class="header-actions">
+        <button type="button" class="icon-btn" data-theme-toggle aria-label="切换浅色 / 深色主题">
+          <svg class="icon-sun" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+        <a class="btn btn-primary btn-sm" href="https://github.com/guxiaolong/HawkSnap/releases/latest" rel="noopener">下载</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero">
+      <div class="container hero-inner">
+        <img class="hero-icon" src="assets/icon.svg" alt="HawkSnap 应用图标：快门鹰眼" width="112" height="112">
+        <h1>HawkSnap</h1>
+        <p class="slogan">像鹰一样准，一按就截</p>
+        <p class="lede">免费、纯本地的轻量截屏工具。区域 / 全屏截图、智能吸附、标注、OCR、贴图、
+          录屏（MP4 / GIF）、长截图、历史全文搜索——无账号、无云端、无遥测。</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="https://github.com/guxiaolong/HawkSnap/releases/latest" rel="noopener">下载 macOS 版（dmg）</a>
+          <a class="btn btn-ghost" href="docs/index.html">安装与使用文档</a>
+        </div>
+        <p class="hero-note">macOS 12.3+（Intel / Apple Silicon）· 免费开源（AGPL-3.0）</p>
+      </div>
+    </section>
+
+    <section id="features" class="section">
+      <div class="container">
+        <h2>功能</h2>
+        <p class="section-sub">点击卡片查看对应文档（入口、权限要求与已知限制）。</p>
+        <div class="card-grid">
+          <a class="card" href="docs/index.html#f-capture">
+            <h3>基础截图</h3>
+            <p>F1 区域 / 全屏：冻结帧上拖拽框选，方向键 1px 微调、边缘磁吸、延时截图、多显示器各自覆盖层。</p>
+          </a>
+          <a class="card" href="docs/index.html#f-hover">
+            <h3>智能吸附</h3>
+            <p>悬停即高亮光标下的元素或窗口，单击直接选中（元素 → 窗口 → 整屏三级回退），无需拖拽。需辅助功能授权。</p>
+          </a>
+          <a class="card" href="docs/index.html#f-annotate">
+            <h3>标注编辑器</h3>
+            <p>10 类工具：矩形 / 椭圆 / 箭头 / 画笔 / 荧光笔 / 马赛克 / 序号 / 文字 / 裁剪 / 选择，撤销重做无步数限制。</p>
+          </a>
+          <a class="card" href="docs/index.html#f-ocr">
+            <h3>OCR 文字识别</h3>
+            <p>中英双语本地识别（PP-OCRv4，纯本地推理），结果逐行复制 / 导出 txt，并回填历史全文检索。模型按需下载。</p>
+          </a>
+          <a class="card" href="docs/index.html#f-pin">
+            <h3>贴图 Pin</h3>
+            <p>F2 把截图钉在桌面：置顶无边框窗口，拖拽移动、滚轮缩放、Ctrl+滚轮调透明度，多贴图级联错开。</p>
+          </a>
+          <a class="card" href="docs/index.html#f-record">
+            <h3>录屏</h3>
+            <p>F6 区域 / 整屏录制，MP4（H.264 + 系统声音）或 GIF 导出，录制中可开摄像头画中画与按键显示。</p>
+          </a>
+          <a class="card" href="docs/index.html#f-history">
+            <h3>历史搜索</h3>
+            <p>每次截图 / 录制 / 长截图自动入本地库，支持含 OCR 文本的中英文全文搜索、重新编辑、按类型管理。</p>
+          </a>
+          <a class="card" href="docs/index.html#f-plugin">
+            <h3>浏览器插件</h3>
+            <p>Chrome / Edge 整页（10000px+ 高保真）/ 可见区 / 区域截图，标注后复制下载，可选发送到桌面端历史。</p>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section id="platform" class="section section-alt">
+      <div class="container">
+        <h2>平台支持</h2>
+        <p class="section-sub">与 README「平台支持」一节同口径：只承诺验证过的，其余如实标注。</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">平台</th>
+                <th scope="col">编译</th>
+                <th scope="col">截图（区域 / 窗口 / 全屏）</th>
+                <th scope="col">录屏 / 画中画 / 长截图 / 贴图 / 按键显示</th>
+                <th scope="col">二进制分发</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">macOS 12.3+（Intel / Apple Silicon）</th>
+                <td>✅</td>
+                <td>✅ 功能完整</td>
+                <td>✅ 功能完整</td>
+                <td>✅（当前唯一发布平台）</td>
+              </tr>
+              <tr>
+                <th scope="row">Linux（Ubuntu 22.04 / 24.04）</th>
+                <td>✅</td>
+                <td>⚠️ 走跨平台 xcap 后端（可能可用，<strong>未适配、未实测</strong>；窗口自动识别为 macOS 专属）</td>
+                <td>❌ macOS 专属——相关入口明确报错</td>
+                <td>❌</td>
+              </tr>
+              <tr>
+                <th scope="row">Windows（Win10 1903+ / Win11）</th>
+                <td>✅</td>
+                <td>⚠️ 同 Linux（xcap 后端，<strong>未适配、未实测</strong>）</td>
+                <td>❌ macOS 专属——同上</td>
+                <td>❌</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="table-note">Linux / Windows 当前只保证「能编译、能跑测」；真正的平台适配（打包、签名、更新 feed 与
+          采集能力逐项验证）留待后续里程碑。macOS 专属能力在其它平台<strong>明确报错</strong>，绝不静默假装成功。</p>
+      </div>
+    </section>
+
+    <section id="privacy" class="section">
+      <div class="container">
+        <h2>隐私与许可</h2>
+        <div class="privacy-grid">
+          <div class="privacy-item">
+            <h3>无遥测，无账号</h3>
+            <p>截图、历史、OCR、录屏全部<strong>纯本地</strong>：不上传、不采集、不要求注册。浏览器插件同样只截取
+              你<strong>显式触发</strong>（工具栏点击 / 快捷键）的页面，不后台采集、不上报。</p>
+          </div>
+          <div class="privacy-item">
+            <h3>OCR 模型按需下载</h3>
+            <p>首次使用 OCR 时联网下载约 60MB 模型（官方 release 源，全程 SHA256 校验），此后<strong>离线可用</strong>；
+              引擎空闲 10 分钟自动释放内存。</p>
+          </div>
+          <div class="privacy-item">
+            <h3>AGPL-3.0 开源</h3>
+            <p>HawkSnap 以 <strong>GNU AGPL-3.0-or-later</strong> 授权（GIF 导出链接了 AGPL 的 gifski）。
+              每个发布版本都提供<strong>对应源码</strong>：仓库同 tag 源码 + Release 页源码归档，第三方声明见
+              LICENSE-THIRD-PARTY.md。</p>
+          </div>
+        </div>
+        <div class="license-links">
+          <a class="btn btn-ghost btn-sm" href="https://github.com/guxiaolong/HawkSnap/blob/main/LICENSE" rel="noopener">LICENSE（AGPL-3.0）</a>
+          <a class="btn btn-ghost btn-sm" href="https://github.com/guxiaolong/HawkSnap/blob/main/LICENSE-THIRD-PARTY.md" rel="noopener">第三方组件声明</a>
+          <a class="btn btn-ghost btn-sm" href="https://github.com/guxiaolong/HawkSnap" rel="noopener">GitHub 仓库</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <img src="assets/lockup.svg" alt="HawkSnap — 像鹰一样准，一按就截" width="148" height="40">
+      </div>
+      <nav class="footer-nav" aria-label="页脚导航">
+        <a href="docs/index.html">文档</a>
+        <a href="https://github.com/guxiaolong/HawkSnap/releases/latest" rel="noopener">下载</a>
+        <a href="https://github.com/guxiaolong/HawkSnap" rel="noopener">GitHub</a>
+        <a href="https://github.com/guxiaolong/HawkSnap/blob/main/LICENSE" rel="noopener">AGPL-3.0</a>
+      </nav>
+      <p class="footer-note">© <span data-year>2026</span> HawkSnap · 免费、纯本地、开源（AGPL-3.0-or-later）</p>
+    </div>
+  </footer>
+
+  <script src="assets/main.js" defer></script>
+</body>
+</html>

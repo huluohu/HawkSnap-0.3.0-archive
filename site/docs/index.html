@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="HawkSnap 文档：安装与权限授权、快捷键表、浏览器插件安装与 Native Messaging 注册、常见问题（权限弹窗、OCR 模型下载、Intel 支持）。">
+  <meta name="color-scheme" content="dark light">
+  <title>文档 — HawkSnap</title>
+  <link rel="icon" type="image/svg+xml" href="../assets/icon.svg">
+  <link rel="stylesheet" href="../assets/style.css">
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("hawksnap-theme");
+        if (t !== "light" && t !== "dark") {
+          t = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        }
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) { /* 保持默认暗色 */ }
+    })();
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到正文</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="../index.html">
+        <img src="../assets/icon.svg" alt="" width="28" height="28">
+        <span>HawkSnap</span>
+      </a>
+      <nav class="site-nav" aria-label="文档导航">
+        <a href="#install">安装</a>
+        <a href="#hotkeys">快捷键</a>
+        <a href="#features">功能入口</a>
+        <a href="#plugin">浏览器插件</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+      <div class="header-actions">
+        <button type="button" class="icon-btn" data-theme-toggle aria-label="切换浅色 / 深色主题">
+          <svg class="icon-sun" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+        <a class="btn btn-primary btn-sm" href="https://github.com/guxiaolong/HawkSnap/releases/latest" rel="noopener">下载</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero hero-slim">
+      <div class="container">
+        <h1>文档</h1>
+        <p class="lede">安装与授权、快捷键、功能入口速查、浏览器插件与常见问题。</p>
+      </div>
+    </section>
+
+    <!-- ============ 安装 ============ -->
+    <section id="install" class="section">
+      <div class="container narrow">
+        <h2>安装</h2>
+        <ol class="steps">
+          <li>
+            <strong>下载 dmg</strong>：前往
+            <a href="https://github.com/guxiaolong/HawkSnap/releases/latest" rel="noopener">GitHub Releases</a>
+            下载最新版 <code>HawkSnap_*.dmg</code>（macOS 12.3+，Intel / Apple Silicon 同包）。
+          </li>
+          <li><strong>安装</strong>：打开 dmg，把 HawkSnap 拖入「应用程序」，首次启动后常驻托盘（零窗口、后台待命），从托盘菜单打开主面板。</li>
+          <li>
+            <strong>屏幕录制授权</strong>（首次截图必需）：
+            <p>首次按 F1 截图时 macOS 会弹窗请求「屏幕录制」权限，点允许并重启应用。若未弹窗或截图失败，前往
+              <em>系统设置 → 隐私与安全性 → 录屏与系统录音</em>，添加 HawkSnap 并开启，然后重启应用。</p>
+            <p class="callout callout-warn">macOS 14+ 未授权时抓屏可能<strong>静默返回壁纸画面</strong>而非报错——应用内置权限预检与系统设置深链引导（启动及截图时触发），若引导后仍未生效请按上文手动授权并重启。</p>
+          </li>
+          <li id="accessibility">
+            <strong>辅助功能授权</strong>（智能吸附与按键显示）：
+            <p>悬停高亮 / 单击选中、以及录制中的按键显示需要「辅助功能」授权：<em>系统设置 → 隐私与安全性 → 辅助功能</em>
+              添加 HawkSnap。未授权时拖拽框选仍可正常使用，只是没有悬停高亮；按键显示不可用。</p>
+          </li>
+          <li id="screen-recording-extra">
+            <strong>F1 按键模式（媒体键兼容）</strong>：
+            <p>macOS 默认把 F1 当作亮度键。HawkSnap 自动兼容，但需二选一：① <em>系统设置 → 键盘 → 键盘快捷键 → 功能键</em>
+              开启「将 F1、F2 等键用作标准功能键」；或 ② 保持默认（F1 = 亮度键），并按上文授予辅助功能权限（推荐，开箱即用，
+              fn+F1 组合同样有效）。两者都不满足时应用启动会显示引导横幅。</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ============ 快捷键 ============ -->
+    <section id="hotkeys" class="section section-alt">
+      <div class="container narrow">
+        <h2>快捷键</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">按键</th><th scope="col">作用</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><kbd>F1</kbd></td><td>截图：拖拽 = 框选区域，Enter / 双击 = 整屏快捷确认，<kbd>Esc</kbd> 取消</td></tr>
+              <tr><td><kbd>F2</kbd></td><td>贴图：把最近一次截图（或剪贴板图像）钉在桌面</td></tr>
+              <tr><td><kbd>F6</kbd></td><td>录屏：进入选区模式，拖拽 = 录该区域，Enter / 双击 = 整屏；悬浮条可暂停 / 恢复 / 停止</td></tr>
+              <tr><td><kbd>Esc</kbd></td><td>取消截图 / 关闭贴图 / 退出选区</td></tr>
+              <tr><td><kbd>Enter</kbd></td><td>确认选区（截图 / 录屏 / 长截图通用）</td></tr>
+              <tr><td><kbd>方向键</kbd></td><td>微调选区 1px（<kbd>Shift</kbd> = 10px），贴近窗口边缘 8px 内自动磁吸</td></tr>
+              <tr><td><kbd>C</kbd></td><td>框选中切换取色器（放大镜取色，点击复制 HEX / RGB）</td></tr>
+              <tr><td><kbd>⌘S</kbd></td><td>长截图「完成」/ 编辑器保存</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>自定义热键</h3>
+        <p>主面板 → 设置 → 全局热键：截图 / 贴图 / 录制三项可自定义，修改后立即生效；与其他应用冲突时保存失败并提示
+          （macOS 无公开 API 列出占用者，请自行排查）。F1 / F2 / F6 为出厂默认。</p>
+        <h3>标注编辑器内快捷键</h3>
+        <p><kbd>⌘Z</kbd> / <kbd>⌘⇧Z</kbd> 撤销 / 重做（无步数限制）、<kbd>Delete</kbd> 删除选中形状、<kbd>⌘S</kbd>
+          保存覆盖原图、双击文字形状重新编辑。</p>
+      </div>
+    </section>
+
+    <!-- ============ 功能入口速查 ============ -->
+    <section id="features" class="section">
+      <div class="container narrow">
+        <h2>功能入口速查</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">功能</th><th scope="col">入口</th><th scope="col">说明</th></tr>
+            </thead>
+            <tbody>
+              <tr id="f-capture"><td>基础截图</td><td><kbd>F1</kbd> / 托盘「截图」</td><td>区域 = 拖拽框选；全屏 = Enter / 双击；支持延时截图（1/2/3/5 秒）与多显示器。</td></tr>
+              <tr id="f-hover"><td>智能吸附</td><td>截图悬停时自动</td><td>悬停高亮元素 / 窗口，单击选中；需辅助功能授权，未授权降级为手动画框。</td></tr>
+              <tr id="f-annotate"><td>标注编辑器</td><td>覆盖层浮条「标注」/ 贴图双击 / 历史「重新编辑」</td><td>10 类工具（矩形/椭圆/箭头/画笔/荧光笔/马赛克/序号/文字/裁剪/选择），⌘S 保存。</td></tr>
+              <tr id="f-ocr"><td>OCR</td><td>编辑器工具栏「OCR」</td><td>中英双语本地识别；首次需下载模型（约 60MB，见 <a href="#faq-model">FAQ</a>）；不支持 Intel（见 <a href="#faq-intel">FAQ</a>）。</td></tr>
+              <tr id="f-pin"><td>贴图 Pin</td><td><kbd>F2</kbd> / 托盘 / 主面板</td><td>拖拽移动、滚轮缩放（10%–3200%）、Ctrl+滚轮调透明度（20%–100%）、Esc 关闭。</td></tr>
+              <tr id="f-record"><td>录屏</td><td><kbd>F6</kbd> 选区模式</td><td>覆盖层横幅可切 MP4 / GIF（格式仅本轮有效）；录制中可开摄像头画中画与按键显示；系统声音随录（GIF 无音频）。</td></tr>
+              <tr id="f-scrollshot"><td>长截图</td><td>托盘「长截图」</td><td>拖选区域 → 滚动页面 → <kbd>⌘S</kbd> 完成；单轴纵向拼接，画布上界 256MB / 40000px。</td></tr>
+              <tr id="f-history"><td>历史搜索</td><td>托盘「主面板」→ 历史</td><td>本地 SQLite 全文检索（含 OCR 文本）、查看 / 删除 / 重新编辑；上限 500 条自动裁剪。</td></tr>
+              <tr id="f-plugin"><td>浏览器插件</td><td>浏览器工具栏</td><td>整页 / 可见区 / 区域截图 + 标注 + 复制下载，可选发送到桌面端（见 <a href="#plugin">下节</a>）。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 浏览器插件 ============ -->
+    <section id="plugin" class="section section-alt">
+      <div class="container narrow">
+        <h2>浏览器插件安装</h2>
+        <p>MV3 扩展，支持 Chrome / Edge（同一份构建）。整页截图走 <code>chrome.debugger</code> 的
+          <code>captureBeyondViewport</code>（10000px+ 高页面保真，含懒加载图滚动等待）；使用期间页面顶部会出现浏览器调试横幅，截图结束即消失。</p>
+        <h3>1. 获取并构建</h3>
+        <p>插件以源码随仓库分发：从 <a href="https://github.com/guxiaolong/HawkSnap/releases/latest" rel="noopener">Release</a>
+          下载源码归档 <code>HawkSnap-*-source.tar.gz</code>（或克隆仓库），解出 <code>plugin/</code> 目录后构建：</p>
+        <pre data-copyable><code>cd plugin
+npm ci
+npm run build</code></pre>
+        <p>产物在 <code>plugin/dist/</code>。构建只需 devDependency esbuild，运行时零依赖。</p>
+        <h3>2. 加载已解压的扩展程序</h3>
+        <ol class="steps">
+          <li>打开 <code>chrome://extensions</code>（Edge：<code>edge://extensions</code>）；</li>
+          <li>右上角开启「开发者模式」；</li>
+          <li>点「加载已解压的扩展程序」，选择 <code>plugin/dist</code> 目录；</li>
+          <li>工具栏出现隼形图标 → 点击选择：整页截图 / 可见区域 / 区域截取。</li>
+        </ol>
+        <h3 id="native-host">3.（可选）发送到 HawkSnap 桌面端</h3>
+        <p>经 Native Messaging 把标注后的截图直接送进桌面端历史。宿主名 <code>com.hawksnap.app</code>，
+          只允许你自己的扩展 ID 连接：</p>
+        <ol class="steps">
+          <li>安装桌面端 HawkSnap ≥ 1.0.0（dmg 内含宿主二进制 <code>hawksnap-host</code>）；</li>
+          <li>从源码包解出 <code>scripts/install-native-host.sh</code>，在扩展设置页（或 <code>chrome://extensions</code> 的详情）查看扩展 ID（32 位 a–p 字符），执行：</li>
+        </ol>
+        <pre data-copyable><code>./scripts/install-native-host.sh --ext-id 你的扩展ID</code></pre>
+        <p>脚本会同时写 Chrome 与 Edge 的宿主 manifest（<code>NativeMessagingHosts/com.hawksnap.app.json</code>）。
+          之后在插件编辑器里点「发送到 HawkSnap」即可；宿主未注册 / 载荷超 4MB / 回执超时（30s）时<strong>自动降级为本地下载</strong>并提示原因。</p>
+        <p class="callout">隐私口径：插件只在你显式点击 / 快捷键触发时访问当前页面；不预授权任何站点（无
+          <code>host_permissions</code>）、不后台采集、不上报；与桌面端只在<strong>本机 stdio</strong> 通信，无网络通道。</p>
+      </div>
+    </section>
+
+    <!-- ============ FAQ ============ -->
+    <section id="faq" class="section">
+      <div class="container narrow">
+        <h2>FAQ</h2>
+
+        <h3 id="faq-permissions">截图是黑屏 / 壁纸，权限弹窗没出现？</h3>
+        <p>前往 <em>系统设置 → 隐私与安全性 → 录屏与系统录音</em>，为 HawkSnap 开启权限并<strong>重启应用</strong>。
+          macOS 14+ 未授权时可能静默返回壁纸画面；应用内的权限预检与深链引导会在启动 / 截图时提示。
+          智能吸附无高亮、按键显示不工作则是缺「辅助功能」授权（见<a href="#accessibility">安装</a>一节）。</p>
+
+        <h3 id="faq-model">OCR 模型要下载多大？断网能用吗？</h3>
+        <p>首次触发 OCR 时联网下载约 60MB（PP-OCRv4 mobile 三模型，官方 release 源 + SHA256 校验，进度条可见），
+          之后<strong>完全离线可用</strong>；推理纯本地，识别结果不上传。引擎空闲 10 分钟自动卸载（单会话峰值内存约 580MB）。</p>
+
+        <h3 id="faq-intel">Intel Mac 支持吗？</h3>
+        <p>基础截图、智能吸附、标注、贴图、录屏 / GIF、长截图、历史等均支持（macOS 12.3+ Intel / Apple Silicon 同包）。
+          <strong>OCR 不支持 Intel macOS</strong>——ONNX Runtime 官方未发布 macOS x64 构建，Intel 机器上会明确报错而非静默失败。</p>
+
+        <h3 id="faq-history">历史和文件保存在哪？会传到云端吗？</h3>
+        <p>全部纯本地：截图在 <code>~/Pictures/HawkSnap</code>，录屏 / GIF 在 <code>~/Movies/HawkSnap</code>，
+          历史索引为本地 SQLite（含 OCR 全文检索）。历史条目上限 500 条自动裁剪——录制条目只删索引行、保留视频文件。</p>
+
+        <h3 id="faq-scrollshot">长截图拼接被拒绝 / 被截断？</h3>
+        <p>长截图只支持<strong>单轴纵向滚动</strong>；周期性内容（聊天气泡、同构瓦片）可能被拒绝拼接——宁可缺一段，
+          绝不产出重影图。画布硬上界 256MB / 高度 40000px，触顶即截断并提示；页面在动但内容不可测量时也会停止并提示。</p>
+
+        <h3>有 Windows / Linux 安装包吗？</h3>
+        <p>暂无。两个平台<strong>可编译、可跑测</strong>（CI 硬门），但截图能力未适配、未实测，录屏等 macOS 专属能力明确报错；
+          打包 / 签名 / 更新 feed 的跨平台分发口径另案裁定（见<a href="../index.html#platform">平台支持</a>）。</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <img src="../assets/lockup.svg" alt="HawkSnap — 像鹰一样准，一按就截" width="148" height="40">
+      </div>
+      <nav class="footer-nav" aria-label="页脚导航">
+        <a href="../index.html">首页</a>
+        <a href="https://github.com/guxiaolong/HawkSnap/releases/latest" rel="noopener">下载</a>
+        <a href="https://github.com/guxiaolong/HawkSnap" rel="noopener">GitHub</a>
+        <a href="https://github.com/guxiaolong/HawkSnap/blob/main/LICENSE" rel="noopener">AGPL-3.0</a>
+      </nav>
+      <p class="footer-note">© <span data-year>2026</span> HawkSnap · 免费、纯本地、开源（AGPL-3.0-or-later）</p>
+    </div>
+  </footer>
+
+  <script src="../assets/main.js" defer></script>
+</body>
+</html>
