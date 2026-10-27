@@ -55,6 +55,9 @@ set -euo pipefail
 
 PROFILE="release"
 INJECT_APP=""
+# 防御性初始化：set -u 下末尾总结 heredoc 的变量展开永不致命（CI 首跑事故）
+BIN_SRC="${BIN_SRC:-}"
+STAGED="${STAGED:-}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MANIFEST_PATH="$REPO_DIR/app/src-tauri/Cargo.toml"
 

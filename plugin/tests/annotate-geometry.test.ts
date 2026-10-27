@@ -46,7 +46,7 @@ describe('arrowGeometry（箭头头部）', () => {
   });
   it('笔画细：headLen 有下限（仍可见）', () => {
     const g = arrowGeometry({ x: 0, y: 0 }, { x: 100, y: 0 }, 2); // raw 8 → 钳到 10
-    assert.equal(Math.hypot(g.tip.x - g.baseA.x, g.tip.y - g.baseA.y), 10);
+    assert.ok(Math.abs(Math.hypot(g.tip.x - g.baseA.x, g.tip.y - g.baseA.y) - 10) < 1e-9);
   });
   it('笔画粗：headLen 有上限（不爆视野）', () => {
     const g = arrowGeometry({ x: 0, y: 0 }, { x: 100, y: 0 }, 100); // raw 400 → 钳到 28

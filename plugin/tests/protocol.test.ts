@@ -177,7 +177,9 @@ describe('readPngSize（§2.1 真实像素的生成侧来源）', () => {
 describe('bytesToBase64 / uuid', () => {
   it('小数组往返一致', () => {
     assert.equal(bytesToBase64(Uint8Array.from([104, 105])), 'aGk=');
-    assert.equal(atob(bytesToBase64(Uint8Array.from([0, 1, 2, 250, 255]))).charCodeAt(4), 250);
+    const bin = atob(bytesToBase64(Uint8Array.from([0, 1, 2, 250, 255])));
+    assert.equal(bin.charCodeAt(3), 250);
+    assert.equal(bin.charCodeAt(4), 255);
   });
 
   it('大数组分块转换不抛错（>32k 触发多块路径）', () => {
