@@ -1,7 +1,0 @@
-name: size-probe
-on: push
-jobs:
-  size:
-    runs-on: macos-14
-    steps:
-      - run: echo "macos-14 runner ok"
