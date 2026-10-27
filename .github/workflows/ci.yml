@@ -184,6 +184,14 @@ jobs:
       # 产物布局（tauri v2，createUpdaterArtifacts: true 时 v2 updater 直接用安装器
       # 本体 + 同名 .sig；macOS 为 .app.tar.gz 归档 + .sig）：
       #   macOS   target/release/bundle/macos/HawkSnap.app.tar.gz{,.sig} + dmg/*.dmg
+      # M4 P1：Native Messaging 宿主（hawksnap-host）是 feature 门控的独立 bin，
+      # 默认构建不含它 → 必须**先**构建并暂存给 tauri-bundler（externalBin，
+      # 见 src-tauri/tauri.release.conf.json），bundler 才会把它复制进 .app
+      # （Contents/MacOS/hawksnap-host）。顺序很关键：bundler 先产出
+      # .app.tar.gz，事后再往 .app 里拷已经晚于归档生成。
+      # 暂存目录 app/src-tauri/binaries/<triple>/ 不入库（.gitignore）。
+      - name: "Stage native messaging host (M4 P1)"
+        run: scripts/package-native-host.sh
       - name: "tauri build (macOS: app + dmg)"
         working-directory: app
         run: npm run tauri build -- --config src-tauri/tauri.release.conf.json --bundles app dmg

@@ -19,13 +19,17 @@
 #
 # 宿主二进制：默认按下列顺序探测（找不到就报错并给出构建命令）：
 #   1) --host-path 显式指定
-#   2) <repo>/target/release/hawksnap-host
-#   3) <repo>/target/debug/hawksnap-host
-#   4) /Applications/HawkSnap.app/Contents/MacOS/hawksnap-host
+#   2) /Applications/HawkSnap.app/Contents/MacOS/hawksnap-host（**随 .app 分发**
+#      的那份——由 scripts/package-native-host.sh 注入）
+#   3) <repo>/target/release/hawksnap-host（本地开发构建）
+#   4) <repo>/target/debug/hawksnap-host
 #
 # 构建宿主（feature 门控，不进默认构建）：
 #   cargo build --release --features native-host --bin hawksnap-host \
 #     --manifest-path app/src-tauri/Cargo.toml
+#
+# 随 .app 分发（发布流程必须跑）：
+#   scripts/package-native-host.sh            # 构建宿主 + 注入 HawkSnap.app
 #
 # 平台：**仅 macOS**（1.0 的浏览器插件只随 macOS 版发布；Linux/Windows 的
 # manifest 目录与安装流程不同，见 README 的平台支持表）。
@@ -66,9 +70,9 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # —— 探测宿主二进制 ——
 if [ -z "$HOST_PATH" ]; then
   for candidate in \
+    "/Applications/HawkSnap.app/Contents/MacOS/hawksnap-host" \
     "$REPO_DIR/target/release/hawksnap-host" \
-    "$REPO_DIR/target/debug/hawksnap-host" \
-    "/Applications/HawkSnap.app/Contents/MacOS/hawksnap-host"; do
+    "$REPO_DIR/target/debug/hawksnap-host"; do
     if [ -x "$candidate" ]; then
       HOST_PATH="$candidate"
       break
@@ -103,12 +107,14 @@ ALLOWED_ORIGIN="chrome-extension://${EXT_ID:-<EXT_ID>}/"
 if [ -z "$EXT_ID" ]; then
   echo "提示: 未提供 --ext-id，allowed_origins 写入占位符 ${ALLOWED_ORIGIN}" >&2
   echo "      请把 <EXT_ID> 替换成插件的真实扩展 ID 后重新运行本脚本。" >&2
+elif ! printf '%s' "$EXT_ID" | grep -Eq '^[a-p]{32}$'; then
+  # Chrome 的扩展 ID 是 32 个 a-p 字符（a..p 的 base-16 变体）。写错 → 浏览器
+  # 会拒绝连接该宿主，且错因极难排查 → 这里当场拒。
+  die "--ext-id 格式非法：应为 32 个 a-p 字符（如 aapbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb），收到: $EXT_ID"
 fi
 
-write_manifest() {
-  local dir="$1"
-  mkdir -p "$dir"
-  cat > "$dir/$MANIFEST" <<JSON
+manifest_body() {
+  cat <<JSON
 {
   "name": "$HOST_NAME",
   "description": "HawkSnap native messaging host (browser capture → desktop app)",
@@ -119,12 +125,21 @@ write_manifest() {
   ]
 }
 JSON
+}
+
+write_manifest() {
+  local dir="$1"
+  local target="$dir/$MANIFEST"
+  # **dry-run 绝不写盘**（旧版是先写再判断 dry-run → 「预览」其实改了系统）。
   if [ "$DRY_RUN" = "1" ]; then
-    echo "--- (dry-run) $dir/$MANIFEST ---"
-    cat "$dir/$MANIFEST"
-  else
-    echo "已写入: $dir/$MANIFEST"
+    echo "--- (dry-run) 将写入 $target ---"
+    manifest_body
+    echo "--- (dry-run) 未写入任何文件 ---"
+    return
   fi
+  mkdir -p "$dir"
+  manifest_body > "$target"
+  echo "已写入: $target"
 }
 
 write_manifest "$CHROME_DIR"

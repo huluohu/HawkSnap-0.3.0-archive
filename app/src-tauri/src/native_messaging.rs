@@ -37,6 +37,16 @@ use tauri::{AppHandle, Emitter};
 /// 监听是否在跑（`native_messaging_status` 命令的返回源）。
 static LISTENING: AtomicBool = AtomicBool::new(false);
 
+/// 监听线程的守卫：线程退出（含 panic）时把「就绪」标志置否——单向标志会骗人
+/// （线程死了但状态还报 ready）。
+struct ListeningGuard;
+
+impl Drop for ListeningGuard {
+    fn drop(&mut self) {
+        LISTENING.store(false, Ordering::SeqCst);
+    }
+}
+
 /// 单连接读超时——防止半开连接占住线程。
 const CONN_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -149,6 +159,9 @@ fn accept_loop<F>(listener: TcpListener, handler: Arc<F>, token: String)
 where
     F: Fn(&Frame) -> Reply + Send + Sync + 'static,
 {
+    // 监听线程活着 = 桥就绪；线程退出（含 panic）→ 状态置否（否则
+    // native_messaging_status 会一直报 true，误导用户）。
+    let _guard = ListeningGuard;
     for stream in listener.incoming() {
         match stream {
             Ok(s) => {
@@ -185,7 +198,18 @@ where
         Err(e) => Reply::err("", e),
         Ok(frame) => match frame.token.as_deref() {
             // 令牌不对 = 不是本机已注册宿主 → 拒（不回显任何路径信息）。
-            Some(t) if tokens_equal(t, token) => handler(&frame),
+            Some(t) if tokens_equal(t, token) => {
+                // 桌面端**只**认 capture：`save` 是宿主侧的落地命令，桌面端不应
+                // 把它当成一次截图入库（否则会出现「save 帧被当成截图入历史」）。
+                if frame.cmd == "capture" {
+                    handler(&frame)
+                } else {
+                    Reply::err(
+                        &frame.id,
+                        format!("桌面端不支持命令: {}（save 仅为宿主侧命令）", frame.cmd),
+                    )
+                }
+            }
             _ => Reply::err(&frame.id, "未授权的请求（令牌无效）"),
         },
     };
@@ -268,16 +292,13 @@ pub fn native_ingest(
     std::fs::create_dir_all(&save_dir).map_err(|e| e.to_string())?;
 
     let db = crate::history::db_path(&app);
-    let outcome = ingest_capture_at(&src, &save_dir, Some(&db))?;
-
-    // 帧里的 width/height 只作参考：**以 PNG 实际像素为准**（插件可能谎报或
-    // 省略）；不一致时留一条线索（不静默）。
-    if width > 0 && height > 0 && (width != outcome.width || height != outcome.height) {
-        eprintln!(
-            "[hawksnap] 浏览器截图尺寸与帧声明不一致（帧 {width}x{height}，实际 {}x{}），以实际为准",
-            outcome.width, outcome.height
-        );
-    }
+    // 帧声明的宽高一并传下去（悬殊不符 → 拒；轻微差异 → 以实际为准并记日志）。
+    let declared = if width > 0 && height > 0 {
+        Some((width, height))
+    } else {
+        None
+    };
+    let outcome = ingest_capture_at(&src, &save_dir, Some(&db), declared)?;
 
     let payload = BrowserCapturePayload {
         path: outcome.saved_path.to_string_lossy().into_owned(),
@@ -290,19 +311,38 @@ pub fn native_ingest(
 
 /// 落盘 + 缩略图 + 入库（**无 AppHandle 依赖** → 可单测）。
 ///
+/// - **先验尺寸再解码**（`validate_capture_file`）：文件体积 ≤ 64 MiB、PNG 的
+///   真实像素数 ≤ 40 MP——两道闸都在解码之前，避免「大文件读进内存 / 解码尖峰」
+///   这个 DoS 面；
+/// - 帧声明的宽高与真实宽高**悬殊不符**（任一轴 > 4 倍）→ 拒（帧在撒谎）；
+///   仅轻微差异（如 CSS 像素 vs 设备像素）→ 记日志，以真实像素为准；
 /// - 原文件按字节复制到 save_dir（命名模板 `{app} {date} {time}`，app 段固定
 ///   "browser"）；不重编码（插件给的是 PNG，字节级保真）；
-/// - 尺寸以 **PNG 实际像素**为准（帧里的 width/height 只作参考，插件可能
-///   谎报或省略）；
 /// - 缩略图 320 长边（与既有截图入库口径一致）→ 落 `save_dir/thumbs/`；
 /// - 历史入库 kind="browser"、app="browser"（前端按 kind 门控动作）。
 pub(crate) fn ingest_capture_at(
     src: &Path,
     save_dir: &Path,
     db: Option<&Path>,
+    declared: Option<(u32, u32)>,
 ) -> Result<IngestOutcome, String> {
+    let (w, h) = crate::native_protocol::validate_capture_file(src)?;
+    if let Some((dw, dh)) = declared {
+        if dw > 0 && dh > 0 && (dw > w.saturating_mul(4) || dh > h.saturating_mul(4)) {
+            return Err(format!(
+                "帧声明尺寸与图片实际不符（帧 {dw}×{dh}，实际 {w}×{h}）"
+            ));
+        }
+        if (dw, dh) != (w, h) {
+            eprintln!(
+                "[hawksnap] 浏览器截图尺寸与帧声明不一致（帧 {dw}×{dh}，实际 {w}×{h}），以实际为准"
+            );
+        }
+    }
     let bytes = std::fs::read(src).map_err(|e| format!("读取临时文件失败: {e}"))?;
-    let (rgba, w, h) = hawksnap_core::crop::png_to_rgba(&bytes).map_err(|e| e.to_string())?;
+    let (rgba, dw, dh) = hawksnap_core::crop::png_to_rgba(&bytes).map_err(|e| e.to_string())?;
+    // 解码后的真实尺寸才是权威（IHDR 与解码结果一致，防「头信息造假」）。
+    let (w, h) = (dw, dh);
     if w == 0 || h == 0 {
         return Err("图片尺寸非法".to_string());
     }
@@ -442,11 +482,7 @@ mod tests {
         let db_c = db.clone();
         start_listener_with(cfg_path.clone(), 0, move |frame: &Frame| {
             // 与生产路径同款：令牌校验已在 accept 循环完成，这里直接走落盘入库。
-            match ingest_capture_at(
-                Path::new(&frame.path),
-                &save_dir_c,
-                Some(&db_c),
-            ) {
+            match ingest_capture_at(Path::new(&frame.path), &save_dir_c, Some(&db_c), None) {
                 Ok(o) => Reply::ok(&frame.id, o.saved_path.to_string_lossy().into_owned()),
                 Err(e) => Reply::err(&frame.id, e),
             }
@@ -511,9 +547,41 @@ mod tests {
         assert!(saved.starts_with(&save_dir_s), "必须落在 save_dir: {saved}");
         assert!(saved.ends_with(".png"));
 
-        // 历史入库一行 kind="browser"、app="browser"。
+        // —— 恶意 path（临时目录外）→ 桌面端必须拒（不落盘、不入库）——
+        let mut s = TcpStream::connect(("127.0.0.1", cfg.port)).unwrap();
+        let bad_path = format!(
+            r#"{{"cmd":"capture","id":"bad-path","path":"/etc/hawksnap-plugin-evil.png","width":1,"height":1,"token":"{}"}}
+"#,
+            cfg.token
+        );
+        s.write_all(bad_path.as_bytes()).unwrap();
+        let mut line = String::new();
+        BufReader::new(&mut s).read_line(&mut line).unwrap();
+        let reply: Reply = serde_json::from_str(line.trim()).unwrap();
+        assert!(!reply.ok, "临时目录外的路径必须被拒，实际: {line}");
+        assert!(reply.saved_path.is_none(), "被拒的请求不得返回落盘路径");
+
+        // —— cmd=save → 桌面端只认 capture，必须拒（否则 save 帧会被当成截图入库）——
+        let mut s = TcpStream::connect(("127.0.0.1", cfg.port)).unwrap();
+        let save_cmd = format!(
+            r#"{{"cmd":"save","id":"save-1","path":"{}","token":"{}"}}
+"#,
+            plugin_png.to_string_lossy(),
+            cfg.token
+        );
+        s.write_all(save_cmd.as_bytes()).unwrap();
+        let mut line = String::new();
+        BufReader::new(&mut s).read_line(&mut line).unwrap();
+        let reply: Reply = serde_json::from_str(line.trim()).unwrap();
+        assert!(!reply.ok, "桌面端必须拒绝非 capture 命令，实际: {line}");
+        assert!(
+            reply.error.unwrap_or_default().contains("save"),
+            "错误信息应说明 save 仅宿主侧支持，实际: {line}"
+        );
+
+        // 历史入库一行 kind="browser"、app="browser"（上面两个被拒的请求不得入库）。
         let rows = crate::history::list_at(&db, 10, 0).unwrap();
-        assert_eq!(rows.len(), 1, "应有且仅有一行历史，实际: {rows:?}");
+        assert_eq!(rows.len(), 1, "应只有合法帧入库一行，实际: {rows:?}");
         assert_eq!(rows[0].kind, "browser");
         assert_eq!(rows[0].app, "browser");
         assert_eq!(rows[0].path, saved);
@@ -531,5 +599,33 @@ mod tests {
     fn parse_frame_rejects_malformed_over_the_wire() {
         // 纯函数层的畸形帧拒绝（不经 socket）——协议契约的第二道断言。
         assert!(parse_frame("{oops").is_err());
+    }
+
+    #[test]
+    fn ingest_rejects_grossly_lying_declared_size() {
+        // 帧声明的尺寸与图片真实尺寸悬殊不符（> 4 倍）→ 拒（帧在撒谎 / 上限绕过）。
+        let d = temp_dir("lying");
+        let src = d.join("hawksnap-plugin-lie.png");
+        std::fs::write(&src, tiny_png()).unwrap();
+        let save_dir = d.join("save");
+        let e = ingest_capture_at(&src, &save_dir, None, Some((4000, 4000))).unwrap_err();
+        assert!(e.contains("帧声明尺寸与图片实际不符"), "实际: {e}");
+        // 轻微差异（CSS 像素 vs 设备像素）不拒 → 以实际为准。
+        let ok = ingest_capture_at(&src, &save_dir, None, Some((2, 2))).unwrap();
+        assert_eq!((ok.width, ok.height), (1, 1));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn ingest_rejects_non_png_source() {
+        let d = temp_dir("notpng");
+        let src = d.join("hawksnap-plugin-text.png");
+        std::fs::write(&src, b"definitely not a png").unwrap();
+        let save_dir = d.join("save");
+        let e = ingest_capture_at(&src, &save_dir, None, None).unwrap_err();
+        assert!(e.contains("PNG"), "实际: {e}");
+        // 被拒的文件不得落盘。
+        assert!(!save_dir.exists() || std::fs::read_dir(&save_dir).unwrap().count() == 0);
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

@@ -39,6 +39,16 @@ pub const PLUGIN_FILE_PREFIX: &str = "hawksnap-plugin-";
 /// 单帧上限（8 MiB）——防内存耗尽（宿主侧 base64 图片载荷也在此限内）。
 pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 
+/// 插件临时截图的**文件体积**上限（64 MiB）——入库前先看文件大小，避免把一个
+/// 超大文件整个读进内存（DoS 面）。
+pub const MAX_CAPTURE_BYTES: u64 = 64 * 1024 * 1024;
+
+/// 插件临时截图的**像素数**上限（40 MP）——按 PNG 的 IHDR 读真实宽高（不解码
+/// 全图）即可判定；超限直接拒，避免解码时的内存尖峰。
+///
+/// 口径说明：1920×10000 的整页长截图 ≈ 19.2 MP，在限内；40 MP 之上属异常。
+pub const MAX_CAPTURE_PIXELS: u64 = 40_000_000;
+
 /// 宿主配置文件名（位于用户配置目录，见 [`config_dir`]）。
 pub const CONFIG_FILE_NAME: &str = "native-host.json";
 
@@ -261,10 +271,20 @@ pub fn write_host_config(path: &Path, cfg: &HostConfig) -> Result<(), String> {
 
 /// 写「仅本人可读」的文件（0600）。Unix 下用 `mode(0o600)` 建文件并显式
 /// `set_permissions` 复核（文件已存在时 `mode` 不生效——必须复核）。
+///
+/// **写临时文件再 rename**（原子替换）：直接截断重写会让「恰好在重写中途读到
+/// 配置文件」的宿主读到半截 JSON（解析失败 → 宿主误判桌面端没起）。rename 在
+/// 同一文件系统内是原子的 → 读者只会看到「完整的旧内容」或「完整的新内容」。
 pub fn write_secret_file(path: &Path, contents: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("创建目录失败 ({}): {e}", parent.display()))?;
+        // 建目录 + 收紧权限（0700）都在 set_dir_mode 里（新建时才收紧）。
+        set_dir_mode(parent)?;
     }
+    // 临时名带 pid：同目录内唯一，避免并发写互相覆盖。
+    let tmp = path.with_extension(format!(
+        "tmp-{}",
+        std::process::id()
+    ));
     #[cfg(unix)]
     {
         use std::io::Write;
@@ -274,19 +294,98 @@ pub fn write_secret_file(path: &Path, contents: &str) -> Result<(), String> {
             .create(true)
             .truncate(true)
             .mode(0o600)
-            .open(path)
-            .map_err(|e| format!("打开文件失败 ({}): {e}", path.display()))?;
+            .open(&tmp)
+            .map_err(|e| format!("打开文件失败 ({}): {e}", tmp.display()))?;
         f.write_all(contents.as_bytes())
-            .map_err(|e| format!("写入失败 ({}): {e}", path.display()))?;
+            .map_err(|e| format!("写入失败 ({}): {e}", tmp.display()))?;
         f.sync_all().ok();
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-            .map_err(|e| format!("设置权限失败 ({}): {e}", path.display()))?;
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("设置权限失败 ({}): {e}", tmp.display()))?;
     }
     #[cfg(not(unix))]
     {
-        fs::write(path, contents).map_err(|e| format!("写入失败 ({}): {e}", path.display()))?;
+        fs::write(&tmp, contents).map_err(|e| format!("写入失败 ({}): {e}", tmp.display()))?;
+    }
+    // Windows 的 rename 不覆盖已存在文件 → 先删旧的再改名（非原子，但 Windows
+    // 上本任务只需「能用」；Unix 走上面的原子路径）。
+    #[cfg(target_os = "windows")]
+    if path.exists() {
+        let _ = fs::remove_file(path);
+    }
+    fs::rename(&tmp, path).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        format!("替换文件失败 ({}): {e}", path.display())
+    })?;
+    // rename 后再复核目标权限（保险：目标可能是旧文件，rename 覆盖后权限随之替换）
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
     }
     Ok(())
+}
+
+/// 配置目录权限 0700（目录里放着令牌文件）。已存在的目录**不改**权限（可能是
+/// 与其它产物共用的应用数据目录），只在**本次新建**时收紧。
+fn set_dir_mode(dir: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let is_new = !dir.exists();
+        if is_new {
+            fs::create_dir_all(dir).map_err(|e| format!("创建目录失败 ({}): {e}", dir.display()))?;
+            fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
+                .map_err(|e| format!("设置目录权限失败 ({}): {e}", dir.display()))?;
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+    }
+    Ok(())
+}
+
+/// 校验插件临时截图**文件**（体积 + 真实像素数），返回 PNG 的宽高。
+///
+/// 两道闸都在**解码之前**：
+///   ① `metadata().len()` ≤ [`MAX_CAPTURE_BYTES`]（64 MiB）——防「超大文件被整个
+///      读进内存」；
+///   ② 读 PNG 的 IHDR（头 24 字节）拿真实宽高，宽高积 ≤ [`MAX_CAPTURE_PIXELS`]
+///      （40 MP）——防「解码时的内存尖峰」。
+///
+/// 顺带确认「这确实是 PNG」（签名 + IHDR）——不是 PNG 的文件直接拒。
+pub fn validate_capture_file(path: &Path) -> Result<(u32, u32), String> {
+    let meta = fs::metadata(path).map_err(|e| format!("读取文件属性失败: {e}"))?;
+    if meta.len() > MAX_CAPTURE_BYTES {
+        return Err(format!(
+            "文件过大（{} 字节 > {} 上限）",
+            meta.len(),
+            MAX_CAPTURE_BYTES
+        ));
+    }
+    let mut head = [0u8; 24];
+    {
+        use std::io::Read;
+        let mut f = fs::File::open(path).map_err(|e| format!("打开文件失败: {e}"))?;
+        f.read_exact(&mut head)
+            .map_err(|_| "文件过短（不是有效的 PNG）".to_string())?;
+    }
+    const PNG_SIG: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    if head[..8] != PNG_SIG || &head[12..16] != b"IHDR" {
+        return Err("不是有效的 PNG 文件".to_string());
+    }
+    let w = u32::from_be_bytes([head[16], head[17], head[18], head[19]]);
+    let h = u32::from_be_bytes([head[20], head[21], head[22], head[23]]);
+    if w == 0 || h == 0 {
+        return Err("图片尺寸非法".to_string());
+    }
+    if (w as u64) * (h as u64) > MAX_CAPTURE_PIXELS {
+        return Err(format!(
+            "图片像素数过大（{w}×{h} > {} 上限）",
+            MAX_CAPTURE_PIXELS
+        ));
+    }
+    Ok((w, h))
 }
 
 /// 生成一次性令牌（32 位十六进制 = 128 bit）。
@@ -417,5 +516,52 @@ mod tests {
         assert_eq!(a.len(), 32);
         assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
         assert_ne!(a, b);
+    }
+
+    // —— 文件闸（体积 / 像素数）——
+
+    /// 造一个「头信息齐全」的 PNG 头（够 validate_capture_file 读 IHDR 即可）。
+    fn png_head(w: u32, h: u32) -> Vec<u8> {
+        let mut v = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        v.extend_from_slice(&13u32.to_be_bytes()); // IHDR 长度
+        v.extend_from_slice(b"IHDR");
+        v.extend_from_slice(&w.to_be_bytes());
+        v.extend_from_slice(&h.to_be_bytes());
+        v.extend_from_slice(&[8, 6, 0, 0, 0]); // 位深/颜色类型/…
+        v
+    }
+
+    #[test]
+    fn capture_file_reads_real_dimensions() {
+        let dir = std::env::temp_dir().join(format!("hawksnap-np-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("hawksnap-plugin-dim.png");
+        std::fs::write(&p, png_head(1920, 1080)).unwrap();
+        let (w, h) = validate_capture_file(&p).unwrap();
+        assert_eq!((w, h), (1920, 1080));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn capture_file_rejects_oversized_pixels() {
+        let dir = std::env::temp_dir().join(format!("hawksnap-np-px-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("hawksnap-plugin-huge.png");
+        // 100000×100000 = 10^10 像素 → 超 40 MP 上限
+        std::fs::write(&p, png_head(100_000, 100_000)).unwrap();
+        let e = validate_capture_file(&p).unwrap_err();
+        assert!(e.contains("像素数过大"), "实际: {e}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn capture_file_rejects_non_png() {
+        let dir = std::env::temp_dir().join(format!("hawksnap-np-np-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("hawksnap-plugin-bad.png");
+        std::fs::write(&p, b"not a png at all, just text").unwrap();
+        let e = validate_capture_file(&p).unwrap_err();
+        assert!(e.contains("PNG"), "实际: {e}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

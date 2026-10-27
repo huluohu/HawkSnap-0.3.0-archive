@@ -8,5 +8,9 @@ target/
 app/src-tauri/gen/schemas/
 .idea/
 
+# M4 P1：Native Messaging 宿主的构建暂存目录（scripts/package-native-host.sh
+# 生成 → tauri-bundler 的 externalBin 输入；产物，不入库）
+app/src-tauri/binaries/
+
 # 长截图 eval 生成的 HTML 页面（脚本确定性生成，勿入库）
 scripts/scrollshot-eval/pages/

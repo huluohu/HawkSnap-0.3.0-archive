@@ -45,9 +45,28 @@ Chrome / Edge 的 manifest 路径（macOS）：
 ```
 
 - `path` 必须是**绝对路径**的宿主二进制（Chrome 不做 PATH 查找）。
-- `allowed_origins` 必须列出插件的真实扩展 ID（未列入的来源一律拒绝连接）。
+- `allowed_origins` 必须列出插件的真实扩展 ID（未列入的来源一律拒绝连接）；
+  ID 格式 = **32 个 a-p 字符**（`scripts/install-native-host.sh --ext-id` 会校验）。
 - 宿主二进制构建：`cargo build --release --features native-host --bin hawksnap-host
   --manifest-path app/src-tauri/Cargo.toml`（feature 门控，不进默认构建）。
+
+### 1.1 宿主随 .app 分发（打包）
+
+宿主是 feature 门控的独立 bin → **默认构建不含它**，必须显式打包，否则 manifest
+指向的路径不存在（插件永远连不上）：
+
+```bash
+scripts/package-native-host.sh            # 构建 + 暂存给 tauri-bundler
+cd app && npm run tauri build -- --config src-tauri/tauri.release.conf.json --bundles app dmg
+```
+
+- `scripts/package-native-host.sh` 把宿主构建出来并暂存到
+  `app/src-tauri/binaries/<target-triple>/hawksnap-host`；
+- `app/src-tauri/tauri.release.conf.json` 的 `bundle.externalBin: ["hawksnap-host"]`
+  让 bundler 把它复制进 .app → **`/Applications/HawkSnap.app/Contents/MacOS/hawksnap-host`**
+  （**在生成 .app.tar.gz 之前**——事后往 .app 里拷会晚于归档）；
+- `scripts/install-native-host.sh` 的探测顺序把该路径排在**第一位**（其次是仓库
+  里的本地构建，供开发用）。
 
 ## 2. 帧格式（插件 ↔ 宿主）
 
@@ -88,11 +107,17 @@ Chrome / Edge 的 manifest 路径（macOS）：
 - **Chrome/Edge 真实链路**：Chrome 的 native messaging 传输是「4 字节小端长度 +
   载荷」，**由浏览器代劳**——扩展侧用 `port.postMessage(obj)` 发对象、用
   `port.onMessage` 收对象即可，**插件不接触长度前缀**。
-- **宿主侧**：宿主进程同时兼容两种输入格式并在**首帧自动识别**（之后整条流沿用）：
-  - `lines`：裸 JSON 行（`{"cmd":...}\n`）——测试与开发工具用；
-  - `chrome`：4 字节小端长度 + JSON 载荷（浏览器链路）。
+- **宿主侧**：宿主进程兼容两种输入格式，**默认按 Chrome 长度前缀解析**，只有
+  「首字节 `{` 且次字节是可打印 ASCII」才按裸 JSON 行解析（测试与开发工具用）；
+  显式强制：`HAWKSNAP_NATIVE_FRAMING=lines|chrome`。
+  - 误判兜底：行模式下若缓冲区里已出现**完整的 JSON 值**（即使前面混入了长度
+    前缀字节），宿主会直接取出该值并**把帧格式纠正回 Chrome** → 不会挂死。
+  - 静默兜底：宿主等待下一帧超过 **5 分钟**即回一条错误回执并退出（插件会收到
+    `onDisconnect` → **重连**即可，Chrome 会重新拉起宿主）。
 - 回执格式与输入一致（`lines` 写一行，`chrome` 写长度前缀）。
-- 强制指定：`HAWKSNAP_NATIVE_FRAMING=lines|chrome`（宿主进程环境变量，调试用）。
+
+> **插件侧建议**：监听 `port.onDisconnect` 并自动重连（宿主可能因静默超时退出
+> 或被浏览器重启）；每条消息都带 `id` 并按 `id` 配对回执。
 
 ## 3. 路径约束（桌面端与宿主**各校验一次**）
 
@@ -106,6 +131,16 @@ Chrome / Edge 的 manifest 路径（macOS）：
 5. 文件**已存在**（插件刚写完）。
 
 任一不满足 → 回执 `{"ok":false,"error":"…"}`。
+
+**额外的两道闸（解码之前）**
+
+| 闸 | 上限 | 为什么 |
+|---|---|---|
+| 文件体积 | ≤ **64 MiB** | 防「超大文件被整个读进内存」 |
+| 像素数（PNG IHDR 的真实宽高） | ≤ **40 MP** | 防「解码时的内存尖峰」；1920×10000 的整页长截图 ≈ 19.2 MP，在限内 |
+
+另外：帧声明的宽高与图片**真实**宽高**悬殊不符**（任一轴 > 4 倍）→ 拒；仅轻微
+差异（如 CSS 像素 vs 设备像素）→ 以真实像素为准并记一条日志。
 
 > 为什么卡死在临时目录：桌面端只接受「插件自己写的临时文件」。固定前缀让
 > 「任意文件被诱导导入」在协议层就不可表达（路径根 + 扩展名 + 前缀三重约束）。
@@ -143,6 +178,9 @@ Chrome / Edge 的 manifest 路径（macOS）：
 - 回执字段是 `path`（不是 `savedPath`）——它是**临时文件**路径，不是桌面端
   的落盘路径。
 
+> **`save` 是宿主侧命令**：桌面端只认 `capture`——收到 `cmd:"save"` 的帧会被
+> 明确拒绝（`桌面端不支持命令: save`），不会被当成一次截图入库。
+
 ## 5. 桌面端行为（收到合法 `capture` 后）
 
 1. 校验令牌（见 §6）与路径（§3）；
@@ -162,8 +200,9 @@ Chrome / Edge 的 manifest 路径（macOS）：
 |---|---|
 | 监听地址 | **仅 127.0.0.1**（无外网出口；插件与桌面端之间不过公网） |
 | 端口 | 首选 38471，被占则向上回退扫描 16 个；**实际端口写进配置文件**，协议不硬编码端口 |
-| 令牌 | 桌面端**每次启动重新生成**（`/dev/urandom` 128 bit）；配置文件权限 **0600** |
-| 配置文件 | `~/Library/Application Support/com.hawksnap.app/native-host.json`（macOS；Linux `$XDG_CONFIG_HOME/com.hawksnap.app/…`；Windows `%APPDATA%\com.hawksnap.app\…`），内容 `{port, token, pid, hostName}` |
+| 令牌 | 桌面端**每次启动重新生成**（`/dev/urandom` 128 bit）；配置文件权限 **0600**；常量时间比较 |
+| 令牌轮换 | 桌面端重启会换令牌与端口 → **宿主每次转发前都重读配置文件**（不信缓存；桌面端没起时重试 5×300ms） |
+| 配置文件 | `~/Library/Application Support/com.hawksnap.app/native-host.json`（macOS；Linux `$XDG_CONFIG_HOME/com.hawksnap.app/…`；Windows `%APPDATA%\com.hawksnap.app\…`），内容 `{port, token, pid, hostName}`；**写临时文件再 rename**（原子替换 → 读者不会读到半截 JSON）；配置目录新建时权限 **0700** |
 | 来源限制 | 只有拿到令牌的进程能驱动桌面端；插件拿不到令牌（令牌只在宿主与桌面端之间流转） |
 | 载荷上限 | 单帧 8 MiB；连接读写超时 15s（桌面端）/ 30s（宿主↔桌面端） |
 | 写权限面 | 桌面端只会写 `save_dir` 与其 `thumbs/` 子目录；临时文件只读不删 |
@@ -176,8 +215,8 @@ Chrome / Edge 的 manifest 路径（macOS）：
   - `无法连接 HawkSnap 桌面端 (127.0.0.1:<port>)` → 桌面端没在跑，或端口配置
     是旧的（重启桌面端即可刷新配置）。
   - `读取宿主配置失败` → 桌面端从未启动过，或配置文件权限/路径不对。
-  - `未授权的请求（令牌无效）` → 桌面端重启过（令牌轮换）而宿主拿的是旧令牌
-    → 宿主每次启动都重读配置，正常不会发生；出现即说明有第三方在直连回环端口。
+  - `未授权的请求（令牌无效）` → 桌面端的令牌与宿主带来的一致性被破坏（正常不会
+    发生：宿主每次转发都重读配置）。若出现，说明有第三方在直连回环端口。
 - 端到端手工验证（无需浏览器）：
 
   ```bash
