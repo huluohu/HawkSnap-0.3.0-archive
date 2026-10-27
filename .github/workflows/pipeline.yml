@@ -177,9 +177,6 @@ jobs:
     permissions:
       pages: write
       id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
         # fetch-depth: 0 —— push 变更检测要能解析 github.event.before（可能不是 HEAD~1，
