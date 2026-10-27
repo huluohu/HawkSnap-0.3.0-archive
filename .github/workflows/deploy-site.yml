@@ -1,0 +1,46 @@
+# 官网部署（M4 P3）：site/ → GitHub Pages（独立 workflow——与主 CI 隔离故障域：
+# Pages 服务状态异常时不再拖死 rust-test/size/release 等主流程 job，见 2026-10-28 CI 事故）
+name: deploy-site
+on:
+  push:
+    branches: [main]
+    paths: [site/**]
+  workflow_dispatch:
+
+permissions:
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect site/ changes (push only)
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" -- site/ \
+              | grep -q . && echo "changed=true" >> "$GITHUB_OUTPUT" || echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Configure Pages
+        if: steps.gate.outputs.changed != 'false'
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - name: Upload site artifact
+        if: steps.gate.outputs.changed != 'false'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - name: Deploy to GitHub Pages
+        if: steps.gate.outputs.changed != 'false'
+        id: deployment
+        uses: actions/deploy-pages@v4
