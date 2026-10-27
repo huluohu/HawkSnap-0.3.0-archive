@@ -169,7 +169,6 @@ jobs:
   # artifact = site/ 目录本身（纯静态、无构建——见 site/README.md 的「无框架无构建」口径）。
   # 前置（一次性，仓库管理员）：Settings → Pages → Source 选 GitHub Actions，
   # 否则 deploy-pages 报错。
-  pages:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main')
