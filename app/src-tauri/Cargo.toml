@@ -1,6 +1,6 @@
 [package]
 name = "hawksnap"
-version = "0.3.0"
+version = "1.0.0"
 description = "HawkSnap — 像鹰一样准，一按就截"
 authors = ["guxiaolong"]
 edition.workspace = true

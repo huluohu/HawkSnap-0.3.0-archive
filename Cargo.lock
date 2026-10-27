@@ -1853,7 +1853,7 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
 name = "hawksnap"
-version = "0.3.0"
+version = "1.0.0"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -1881,7 +1881,7 @@ dependencies = [
 
 [[package]]
 name = "hawksnap-core"
-version = "0.3.0"
+version = "1.0.0"
 dependencies = [
  "image 0.25.10",
  "serde",
@@ -1891,7 +1891,7 @@ dependencies = [
 
 [[package]]
 name = "hawksnap-ocr"
-version = "0.3.0"
+version = "1.0.0"
 dependencies = [
  "hawksnap-core",
  "image 0.25.10",
@@ -1905,7 +1905,7 @@ dependencies = [
 
 [[package]]
 name = "hawksnap-platform-mac"
-version = "0.3.0"
+version = "1.0.0"
 dependencies = [
  "block2",
  "chrono",
