@@ -79,6 +79,28 @@ pub fn is_listening() -> bool {
     LISTENING.load(Ordering::SeqCst)
 }
 
+/// 退出时删除宿主配置文件（评审修复轮 P9）。
+///
+/// 为什么：配置文件里放着**本次运行的一次性令牌**（0600，但同机同用户的其它
+/// 进程都能读）。桌面端退出后文件若留在盘上 → 令牌仍可被取走 → 而宿主每次
+/// 转发前都重读该文件并把令牌发给「配置里那个端口上的监听者」→ 桌面端退出后
+/// 若有别的进程占住那个端口，它就能以桌面端的身份收到插件的帧（路径 + 截图）。
+/// 故退出即删：令牌的有效期严格等于桌面端的运行期。
+///
+/// 残留：进程被 `SIGKILL` / 崩溃时走不到这里（文件仍在）——那种情况下令牌随
+/// 桌面端一起消失（桌面端不再监听 → 端口无人应答），风险窗口只剩「旧端口被
+/// 别人抢占」这一种，故此处不引入常驻清理线程。
+pub fn cleanup_host_config() {
+    match config_path() {
+        Ok(p) => match std::fs::remove_file(&p) {
+            Ok(()) => eprintln!("[hawksnap] 已删除宿主配置文件: {}", p.display()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => eprintln!("[hawksnap] 删除宿主配置文件失败: {e}"),
+        },
+        Err(e) => eprintln!("[hawksnap] 定位宿主配置文件失败（未清理）: {e}"),
+    }
+}
+
 /// 命令：Native Messaging 桥是否就绪（前端「浏览器插件」分区展示）。
 #[tauri::command]
 pub fn native_messaging_status() -> bool {
@@ -311,9 +333,11 @@ pub fn native_ingest(
 
 /// 落盘 + 缩略图 + 入库（**无 AppHandle 依赖** → 可单测）。
 ///
-/// - **先验尺寸再解码**（`validate_capture_file`）：文件体积 ≤ 64 MiB、PNG 的
+/// - **先验尺寸再解码**（`read_capture_bytes`）：文件体积 ≤ 64 MiB、PNG 的
 ///   真实像素数 ≤ 40 MP——两道闸都在解码之前，避免「大文件读进内存 / 解码尖峰」
-///   这个 DoS 面；
+///   这个 DoS 面；且**只读一次**（评审修复轮 P6：有界读取堵掉「查完属性再换
+///   文件」的 TOCTOU 窗口——旧实现 `metadata().len()` + 稍后 `fs::read` 之间
+///   文件可被换掉，64 MiB 上限形同虚设）；
 /// - 帧声明的宽高与真实宽高**悬殊不符**（任一轴 > 4 倍）→ 拒（帧在撒谎）；
 ///   仅轻微差异（如 CSS 像素 vs 设备像素）→ 记日志，以真实像素为准；
 /// - 原文件按字节复制到 save_dir（命名模板 `{app} {date} {time}`，app 段固定
@@ -326,7 +350,7 @@ pub(crate) fn ingest_capture_at(
     db: Option<&Path>,
     declared: Option<(u32, u32)>,
 ) -> Result<IngestOutcome, String> {
-    let (w, h) = crate::native_protocol::validate_capture_file(src)?;
+    let (w, h, bytes) = crate::native_protocol::read_capture_bytes(src)?;
     if let Some((dw, dh)) = declared {
         if dw > 0 && dh > 0 && (dw > w.saturating_mul(4) || dh > h.saturating_mul(4)) {
             return Err(format!(
@@ -339,7 +363,6 @@ pub(crate) fn ingest_capture_at(
             );
         }
     }
-    let bytes = std::fs::read(src).map_err(|e| format!("读取临时文件失败: {e}"))?;
     let (rgba, dw, dh) = hawksnap_core::crop::png_to_rgba(&bytes).map_err(|e| e.to_string())?;
     // 解码后的真实尺寸才是权威（IHDR 与解码结果一致，防「头信息造假」）。
     let (w, h) = (dw, dh);

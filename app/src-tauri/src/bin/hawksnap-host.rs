@@ -55,6 +55,15 @@ fn main() {
         Ok("chrome") => Some(Framing::Chrome),
         _ => None,
     };
+    // **错误回执**（读帧失败 / 静默超时）的帧格式（评审修复轮 P4）：
+    // 只有**显式**要求 lines（HAWKSNAP_NATIVE_FRAMING=lines）时才用裸 JSON 行，
+    // 其余一律 Chrome 长度前缀。
+    //
+    // 为什么不能沿用「读到的帧格式」：流一旦被误判成 Lines（Chrome 帧的长度
+    // 低字节恰好是 '{'），按行格式回执 → Chrome 读到的是**没有长度前缀**的
+    // 字节 → 它把回执的前 4 字节当长度 → 读出垃圾 → "Invalid message" →
+    // 端口关闭 → 插件只看到 onDisconnect（拿不到任何错误原因）。
+    let error_framing = error_reply_framing(forced);
 
     // 读帧放到独立线程：主线程用 `recv_timeout` 卡住 → 静默超时能变成一条
     // 错误回执，而不是「永远等下去」。
@@ -75,8 +84,7 @@ fn main() {
                     break;
                 }
                 Err(e) => {
-                    let mode = framing.unwrap_or(Framing::Chrome);
-                    let _ = tx.send(FrameMsg::Error(e, mode));
+                    let _ = tx.send(FrameMsg::Error(e));
                     break;
                 }
             }
@@ -99,19 +107,20 @@ fn main() {
                     break;
                 }
             }
-            Ok(FrameMsg::Error(e, mode)) => {
+            Ok(FrameMsg::Error(e)) => {
                 // 读帧出错 → 回一条错误回执（让插件知道是失败而不是「无响应」）。
+                // 帧格式用 error_framing（Chrome 长度前缀，除非显式 lines）。
                 eprintln!("[hawksnap-host] 读取帧失败: {e}");
                 let reply = Reply::err("", format!("读取帧失败: {e}"));
                 let out = serde_json::to_string(&reply).unwrap_or_default();
-                let _ = write_payload(&mut writer, mode, &out);
+                let _ = write_payload(&mut writer, error_framing, &out);
                 break;
             }
             Err(RecvTimeoutError::Timeout) => {
                 eprintln!("[hawksnap-host] 静默超时（{READ_TIMEOUT:?}），退出");
                 let reply = Reply::err("", "宿主静默超时");
                 let out = serde_json::to_string(&reply).unwrap_or_default();
-                let _ = write_payload(&mut writer, Framing::Chrome, &out);
+                let _ = write_payload(&mut writer, error_framing, &out);
                 break;
             }
             Err(RecvTimeoutError::Disconnected) => break,
@@ -126,7 +135,7 @@ enum FrameMsg {
     /// 输入结束（EOF）。
     Eof,
     /// 读帧出错。
-    Error(String, Framing),
+    Error(String),
 }
 
 /// 读宿主配置（端口 + 令牌）——桌面端启动时写的 0600 文件。
@@ -336,17 +345,17 @@ impl<R: Read> FrameReader<R> {
                 return Ok(None);
             }
             let head = &self.buf[..n.min(4)];
-            // **默认按 Chrome 长度前缀解析**；只有「首字节 '{' 且次字节是可打印
-            // ASCII」才按裸 JSON 行解析。
+            // **默认按 Chrome 长度前缀解析**；只有「首字节 '{' 且次字节看起来像
+            // JSON 文本」才按裸 JSON 行解析。
             //
             // 为什么这样判（评审修复轮）：Chrome 帧的头 4 字节是长度（小端），
             // 低字节可能恰好是 '{'(0x7B)。旧判据（「后三字节全 0 才算 Chrome」）
             // 会把长度 ≡ 123 (mod 256) 且 ≥ 256 的帧（如 379/635/891）误判成
             // JSON 行 → 宿主等一个永远不来的 '\n' → **请求永不回执**。新判据把
             // 默认放在 Chrome 上，只有「看起来确实像一行 JSON」才走行模式。
-            // 残留的极小歧义（Chrome 帧长度低字节为 0x7B 且次字节可打印）由行
-            // 模式的 **JSON 值兜底**兜住（见 take_json_value）：能从噪声里解析出
-            // 完整 JSON 值照样出帧，不会挂死。
+            // 残留的极小歧义（Chrome 帧长度低字节为 0x7B 且次字节像 JSON）由
+            // 行模式的**两级兜底**兜住（见下）：① Chrome 长度前缀识别、② JSON
+            // 值兜底（take_json_value）——都不会挂死，也不会让流错位。
             let is_json_line = head[0] == b'{' && head.len() >= 2 && is_json_second_char(head[1]);
             *framing = Some(if is_json_line {
                 Framing::Lines
@@ -354,82 +363,150 @@ impl<R: Read> FrameReader<R> {
                 Framing::Chrome
             });
         }
-        match framing.unwrap_or(Framing::Chrome) {
-            Framing::Chrome => {
-                let n = self.fill(4).map_err(|e| e.to_string())?;
-                if n == 0 {
-                    return Ok(None);
-                }
-                if n < 4 {
-                    return Err("帧头不完整".to_string());
-                }
-                let len =
-                    u32::from_le_bytes([self.buf[0], self.buf[1], self.buf[2], self.buf[3]]) as usize;
-                self.buf.drain(..4);
-                if len > native_protocol::MAX_FRAME_BYTES {
-                    return Err("帧过大".to_string());
-                }
-                let got = self.fill(len).map_err(|e| e.to_string())?;
-                if got < len {
-                    return Err("帧不完整".to_string());
-                }
-                // 取走前 len 字节（split_off + mem::replace：避免 drain(..).collect()
-                // 的 clippy 告警，且不额外分配）。
-                let tail = self.buf.split_off(len);
-                let payload = std::mem::replace(&mut self.buf, tail);
-                Ok(Some(
-                    String::from_utf8(payload).map_err(|_| "帧不是合法 UTF-8".to_string())?,
-                ))
-            }
-            Framing::Lines => loop {
-                // 跳过行首空白（上一帧残留的换行等）。
-                let skip = self
-                    .buf
-                    .iter()
-                    .position(|b| !b.is_ascii_whitespace())
-                    .unwrap_or(self.buf.len());
-                if skip > 0 {
-                    self.buf.drain(..skip);
-                }
-                if let Some(pos) = self.buf.iter().position(|&b| b == b'\n') {
-                    // 取走含换行的那一段（剩余部分留在缓冲里）。
-                    let tail = self.buf.split_off(pos + 1);
-                    let line = std::mem::replace(&mut self.buf, tail);
-                    return Ok(Some(String::from_utf8_lossy(&line).trim().to_string()));
-                }
-                // 没有换行，但缓冲区里已经有一个**完整的 JSON 值** → 直接取出。
-                // 这让「长度前缀被误判成行模式」的 Chrome 流也能恢复（并且把
-                // 误判残留的长度前缀字节一并丢掉，流不会错位）。
-                if let Some((value, had_garbage)) = take_json_value(&mut self.buf) {
-                    if had_garbage {
-                        // 候选位置之前有**非空白**字节 = Chrome 的长度前缀残留
-                        // → 这条流其实是 Chrome 帧流 → 纠正格式（后续帧按长度
-                        // 前缀读，不会错位）。
-                        *framing = Some(Framing::Chrome);
-                    }
-                    return Ok(Some(value));
-                }
-                if self.buf.len() > native_protocol::MAX_FRAME_BYTES {
-                    return Err("帧过长".to_string());
-                }
-                if self.eof {
-                    if self.buf.is_empty() {
+        loop {
+            match framing.unwrap_or(Framing::Chrome) {
+                Framing::Chrome => {
+                    let n = self.fill(4).map_err(|e| e.to_string())?;
+                    if n == 0 {
                         return Ok(None);
                     }
-                    let line = std::mem::take(&mut self.buf);
-                    return Ok(Some(String::from_utf8_lossy(&line).trim().to_string()));
+                    if n < 4 {
+                        return Err("帧头不完整".to_string());
+                    }
+                    let len =
+                        u32::from_le_bytes([self.buf[0], self.buf[1], self.buf[2], self.buf[3]])
+                            as usize;
+                    self.buf.drain(..4);
+                    if len > native_protocol::MAX_FRAME_BYTES {
+                        return Err("帧过大".to_string());
+                    }
+                    let got = self.fill(len).map_err(|e| e.to_string())?;
+                    if got < len {
+                        return Err("帧不完整".to_string());
+                    }
+                    // 取走前 len 字节（split_off + mem::replace：避免 drain(..).collect()
+                    // 的 clippy 告警，且不额外分配）。
+                    let tail = self.buf.split_off(len);
+                    let payload = std::mem::replace(&mut self.buf, tail);
+                    return Ok(Some(
+                        String::from_utf8(payload).map_err(|_| "帧不是合法 UTF-8".to_string())?,
+                    ));
                 }
-                let want = self.buf.len() + 8192;
-                self.fill(want).map_err(|e| e.to_string())?;
-            },
+                Framing::Lines => {
+                    // 跳过行首空白（上一帧残留的换行等）。
+                    let skip = self
+                        .buf
+                        .iter()
+                        .position(|b| !b.is_ascii_whitespace())
+                        .unwrap_or(self.buf.len());
+                    if skip > 0 {
+                        self.buf.drain(..skip);
+                    }
+                    // 长度前缀判定需要 4 字节；不够就先补（EOF 则按现有内容继续）。
+                    if self.buf.len() < 4 && !self.eof {
+                        self.fill(4).map_err(|e| e.to_string())?;
+                        continue;
+                    }
+                    // ① **Chrome 长度前缀兜底**（评审修复轮 P3）。
+                    //
+                    // 为什么必须放在「找换行」之前：Chrome 帧长度 ≡ 123 (mod 256)
+                    // 且长度落在 640–704 KiB 时，长度前缀（小端）的**第三个字节
+                    // 恰好是 0x0A**（'\n'）——例如长度 672123 = 0x000A417B → 前缀
+                    // 字节 7B 41 0A 00。旧顺序「先扫换行」会把长度前缀当成一行
+                    // → 垃圾帧 → 流错位 → 宿主报错退出。
+                    //
+                    // 判据：缓冲区开头 4 字节按小端读出的长度落在 [2, 帧上限]
+                    // → 这条流**就是** Chrome 帧流（帧格式被误判）→ 纠正格式，
+                    // 回到 Chrome 分支按长度前缀读（不会再错位）。
+                    // 误伤面：裸 JSON 行的前 4 字节是 `{"xx` 一类 → 小端读出的
+                    // 「长度」高达 GB 级 → 不会命中（JSON 文本里也没有 NUL 字节）。
+                    if self.chrome_prefix_len().is_some() {
+                        *framing = Some(Framing::Chrome);
+                        continue;
+                    }
+                    // ② **完整 JSON 值**（比换行更可靠的边界）——同样必须**先于**
+                    // 换行判定：缓冲区里若已有一个能解析出的完整 JSON 值，它就是
+                    // 更可信的帧边界（换行可能只是长度前缀里的 0x0A）。
+                    // 这让「长度前缀被误判成行模式」的 Chrome 流也能恢复（并且把
+                    // 误判残留的长度前缀字节一并丢掉，流不会错位）。
+                    if let Some((value, had_garbage)) = take_json_value(&mut self.buf) {
+                        if had_garbage {
+                            // 候选位置之前有**非空白**字节 = Chrome 的长度前缀残留
+                            // → 这条流其实是 Chrome 帧流 → 纠正格式（后续帧按长度
+                            // 前缀读，不会错位）。
+                            *framing = Some(Framing::Chrome);
+                        }
+                        return Ok(Some(value));
+                    }
+                    // ③ 换行边界（缓冲区里既没有完整 JSON 值，也没有长度前缀）。
+                    if let Some(pos) = self.buf.iter().position(|&b| b == b'\n') {
+                        // 取走含换行的那一段（剩余部分留在缓冲里）。
+                        let tail = self.buf.split_off(pos + 1);
+                        let line = std::mem::replace(&mut self.buf, tail);
+                        return Ok(Some(String::from_utf8_lossy(&line).trim().to_string()));
+                    }
+                    if self.buf.len() > native_protocol::MAX_FRAME_BYTES {
+                        return Err("帧过长".to_string());
+                    }
+                    if self.eof {
+                        if self.buf.is_empty() {
+                            return Ok(None);
+                        }
+                        let line = std::mem::take(&mut self.buf);
+                        return Ok(Some(String::from_utf8_lossy(&line).trim().to_string()));
+                    }
+                    let want = self.buf.len() + 8192;
+                    self.fill(want).map_err(|e| e.to_string())?;
+                }
+            }
         }
+    }
+
+    /// 缓冲区开头是否像一个**合法的 Chrome 长度前缀**（小端 u32，落在
+    /// [2, `MAX_FRAME_BYTES`]）。
+    ///
+    /// 用于「行模式其实是 Chrome 帧流」的兜底纠正（评审修复轮 P3）：Chrome 帧
+    /// 的长度前缀被误判成行模式时，靠它把格式纠正回来（并避免把长度前缀里的
+    /// 0x0A 当成行尾 → 垃圾帧 + 流错位）。
+    fn chrome_prefix_len(&self) -> Option<usize> {
+        if self.buf.len() < 4 {
+            return None;
+        }
+        let len = u32::from_le_bytes([self.buf[0], self.buf[1], self.buf[2], self.buf[3]]) as usize;
+        if !(2..=native_protocol::MAX_FRAME_BYTES).contains(&len) {
+            return None;
+        }
+        Some(len)
     }
 }
 
-/// JSON 对象的第二个字符必是可打印 ASCII（`"` / `}` / 字母数字）——空白与控制
-/// 字符都不可能是 JSON 文本的第二字节（JSON 文本不含裸控制字符）。
+/// 错误回执 / 静默超时回执的帧格式（评审修复轮 P4）。
+///
+/// 只有**显式**要求行格式（`HAWKSNAP_NATIVE_FRAMING=lines`）时才用裸 JSON 行，
+/// 其余一律 Chrome 长度前缀。
+///
+/// 为什么不能沿用「读到的帧格式」：流一旦被误判成 Lines（Chrome 帧的长度低字节
+/// 恰好是 '{'），按行格式回执 → Chrome 读到的是**没有长度前缀**的字节 → 它把
+/// 回执的头 4 字节当长度 → 读出垃圾 → "Invalid message" → 端口关闭 → 插件只
+/// 看到 onDisconnect（拿不到任何错误原因）。
+fn error_reply_framing(forced: Option<Framing>) -> Framing {
+    match forced {
+        Some(Framing::Lines) => Framing::Lines,
+        _ => Framing::Chrome,
+    }
+}
+
+/// JSON 文本的第 2 个字符：可打印 ASCII（`"` / `}` / 字母数字 / 标点）**或
+/// 空白**。
+///
+/// ⚠️ 旧注释说「空白与控制字符都不可能是 JSON 文本的第二字节」——**这是错的**：
+/// JSON 允许 `{` 与后续内容之间有空白（如 `{ "cmd": "capture" }`），空白**就是**
+/// 合法的第二字节。旧判据把这种裸 JSON 行当成 Chrome 长度前缀 → 整条流错位
+/// → 宿主报错退出（评审修复轮 P5）。故这里把空白也算作「像 JSON」。
+///
+/// 控制字符（< 0x20 且非空白）仍然排除：JSON 文本里不允许裸控制字符。
 fn is_json_second_char(b: u8) -> bool {
-    (0x21..=0x7e).contains(&b)
+    (0x21..=0x7e).contains(&b) || b.is_ascii_whitespace()
 }
 
 /// 行模式兜底：从缓冲区里取出一个**完整的 JSON 值**（`{` 起）。
@@ -620,6 +697,52 @@ mod tests {
         let mut out = Vec::new();
         write_payload(&mut out, Framing::Chrome, "{}").unwrap();
         assert_eq!(out, vec![2, 0, 0, 0, b'{', b'}']);
+    }
+
+    /// 评审修复轮 P3：Chrome 帧长度 ≡ 123 (mod 256) 且长度落在 640–704 KiB 时，
+    /// 长度前缀（小端）的**第三个字节恰好是 0x0A**（'\n'）——672123 = 0x000A417B
+    /// → 前缀字节 `7B 41 0A 00`。旧顺序（先扫换行）会把长度前缀当成一行 →
+    /// 垃圾帧 → 流错位 → 宿主报错退出。这里必须整帧读出且格式纠正为 Chrome。
+    #[test]
+    fn chrome_frame_with_newline_inside_length_prefix_is_read_as_chrome() {
+        let len = 672_123usize; // ≡ 123 (mod 256)，落在 640–704 KiB 区间
+        assert_eq!(len % 256, 123);
+        let payload = "y".repeat(len);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(payload.as_bytes());
+        // 前缀里确实藏着 '\n'（否则本测试就失去意义）。
+        assert_eq!(&bytes[..4], &[0x7B, 0x41, 0x0A, 0x00]);
+        let mut r = reader(&bytes);
+        let mut framing = None;
+        assert_eq!(
+            r.next_payload(&mut framing).unwrap().unwrap(),
+            payload,
+            "长度前缀里的 0x0A 不能被当成行尾"
+        );
+        assert_eq!(framing, Some(Framing::Chrome), "必须纠正回 Chrome 格式");
+    }
+
+    /// 评审修复轮 P5：裸 JSON 行的第 2 个字节可以是**空白**（JSON 允许 `{` 之后
+    /// 有空白）——旧判据只认「可打印 ASCII」→ 把 `{ "cmd": … }` 当成 Chrome 长度
+    /// 前缀 → 整条流错位。
+    #[test]
+    fn bare_json_line_with_whitespace_second_char_is_read_as_lines() {
+        let mut r = reader(b"{ \"cmd\": \"capture\" }\n");
+        let mut framing = None;
+        assert_eq!(
+            r.next_payload(&mut framing).unwrap().unwrap(),
+            r#"{ "cmd": "capture" }"#
+        );
+        assert_eq!(framing, Some(Framing::Lines));
+    }
+
+    /// 评审修复轮 P4：错误回执的帧格式——只有**显式** lines 才用行格式。
+    #[test]
+    fn error_reply_framing_defaults_to_chrome() {
+        assert_eq!(error_reply_framing(None), Framing::Chrome);
+        assert_eq!(error_reply_framing(Some(Framing::Chrome)), Framing::Chrome);
+        assert_eq!(error_reply_framing(Some(Framing::Lines)), Framing::Lines);
     }
 
     #[test]

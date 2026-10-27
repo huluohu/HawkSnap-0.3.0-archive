@@ -12,5 +12,9 @@ app/src-tauri/gen/schemas/
 # 生成 → tauri-bundler 的 externalBin 输入；产物，不入库）
 app/src-tauri/binaries/
 
+# 单测用的裸相对路径临时文件（native_protocol::write_secret_file 的
+# 「裸相对路径」用例；测试正常结束会自己删掉，残留也不该入库）
+app/src-tauri/hawksnap-np-rel-*.json
+
 # 长截图 eval 生成的 HTML 页面（脚本确定性生成，勿入库）
 scripts/scrollshot-eval/pages/

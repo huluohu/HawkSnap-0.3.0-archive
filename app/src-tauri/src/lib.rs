@@ -368,9 +368,18 @@ pub fn run() {
     // C6 零窗口启动口径：code=None 仅由「最后一个窗口销毁」引发——启动期无窗口不会
     // 自发产生（托盘 + 事件循环独立于窗口存活）；用户关掉懒创建的主面板时恰由本分支
     // 兜住（进程存活，下次托盘「主面板」重建）。
-    app.run(|_app, event| {
-        if let tauri::RunEvent::ExitRequested { code: None, api, .. } = event {
+    app.run(|_app, event| match event {
+        tauri::RunEvent::ExitRequested { code: None, api, .. } => {
             api.prevent_exit();
         }
+        // M4 P1（评审修复轮 P9）：**进程真正退出**时删除宿主配置文件
+        // （里面是一次性令牌）。留着的话：桌面端退出后，同机的其它进程仍能读到
+        // 令牌，并在「旧端口」上冒充桌面端收下插件的帧。
+        // 托盘「退出」走 app.exit(0) → 会走到 RunEvent::Exit；最后一个窗口关闭
+        // 被上面的 prevent_exit 拦下 → 进程还活着 → 配置保留（正确：桌面端还在跑）。
+        tauri::RunEvent::Exit => {
+            crate::native_messaging::cleanup_host_config();
+        }
+        _ => {}
     });
 }

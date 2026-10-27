@@ -117,9 +117,21 @@ jobs:
       - name: npm ci
         working-directory: app
         run: npm ci
-      - name: tauri build
+      # M4 P1（评审修复轮 P2）：size job 必须构建**与发布件同款**的产物。
+      # 之前这里跑的是**不带** tauri.release.conf.json 的构建 → 那个 dmg 里
+      # **没有** Native Messaging 宿主（externalBin 只在 release 配置里开）→
+      # 体积门量的是一个「比发布件小」的 dmg（宿主 ~MB 级）→ 15MB 断言对真正
+      # 发布出去的包**不成立**。故：先暂存宿主，再用带 externalBin 的配置构建。
+      # 为什么用 tauri.host.conf.json 而不是 tauri.release.conf.json：后者还开了
+      # bundle.createUpdaterArtifacts，缺 TAURI_SIGNING_PRIVATE_KEY 时 tauri CLI
+      # 硬失败（PR/fork 无 secrets → 全红）。host conf 只开 externalBin，
+      # updater 产物不进 dmg（macOS 的 updater 载荷是同目录的 .app.tar.gz + .sig），
+      # 两者的 dmg 内容一致。
+      - name: Stage native messaging host (M4 P1)
+        run: scripts/package-native-host.sh
+      - name: tauri build (with native host bundled)
         working-directory: app
-        run: npm run tauri build
+        run: npm run tauri build -- --config src-tauri/tauri.host.conf.json --bundles app dmg
       - name: check size (G1)
         run: bash scripts/check-size.sh
 
@@ -186,10 +198,13 @@ jobs:
       #   macOS   target/release/bundle/macos/HawkSnap.app.tar.gz{,.sig} + dmg/*.dmg
       # M4 P1：Native Messaging 宿主（hawksnap-host）是 feature 门控的独立 bin，
       # 默认构建不含它 → 必须**先**构建并暂存给 tauri-bundler（externalBin，
-      # 见 src-tauri/tauri.release.conf.json），bundler 才会把它复制进 .app
-      # （Contents/MacOS/hawksnap-host）。顺序很关键：bundler 先产出
+      # 见 src-tauri/tauri.release.conf.json 的
+      # bundle.externalBin: ["binaries/hawksnap-host"]），bundler 才会把它复制进
+      # .app（Contents/MacOS/hawksnap-host）。顺序很关键：bundler 先产出
       # .app.tar.gz，事后再往 .app 里拷已经晚于归档生成。
-      # 暂存目录 app/src-tauri/binaries/<triple>/ 不入库（.gitignore）。
+      # 暂存路径 app/src-tauri/binaries/hawksnap-host-<triple> 不入库（.gitignore）。
+      # （评审修复轮 P1：tauri v2 的 externalBin 是**文件名后缀**语义——
+      #  bundler 找的是 binaries/hawksnap-host-<triple>，不是 binaries/<triple>/…。）
       - name: "Stage native messaging host (M4 P1)"
         run: scripts/package-native-host.sh
       - name: "tauri build (macOS: app + dmg)"

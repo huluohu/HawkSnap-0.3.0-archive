@@ -110,7 +110,7 @@ if [ -z "$EXT_ID" ]; then
 elif ! printf '%s' "$EXT_ID" | grep -Eq '^[a-p]{32}$'; then
   # Chrome 的扩展 ID 是 32 个 a-p 字符（a..p 的 base-16 变体）。写错 → 浏览器
   # 会拒绝连接该宿主，且错因极难排查 → 这里当场拒。
-  die "--ext-id 格式非法：应为 32 个 a-p 字符（如 aapbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb），收到: $EXT_ID"
+  die "--ext-id 格式非法：应为 32 个 a-p 字符（如 aapbbbbbbbbbbbbbbbbbbbbbbbbbbbbb），收到: $EXT_ID"
 fi
 
 manifest_body() {

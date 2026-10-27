@@ -278,7 +278,13 @@ pub fn write_host_config(path: &Path, cfg: &HostConfig) -> Result<(), String> {
 pub fn write_secret_file(path: &Path, contents: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         // 建目录 + 收紧权限（0700）都在 set_dir_mode 里（新建时才收紧）。
-        set_dir_mode(parent)?;
+        //
+        // ⚠️ 裸相对路径（"foo.json"）的 `parent()` 是**空路径**（不是 None）——
+        // 直接 set_dir_mode("") 会走到 `set_permissions("")` → ENOENT → 整个
+        // 写文件失败（评审修复轮 P10）。空目录 = 「就用当前工作目录」→ 跳过。
+        if !parent.as_os_str().is_empty() {
+            set_dir_mode(parent)?;
+        }
     }
     // 临时名带 pid：同目录内唯一，避免并发写互相覆盖。
     let tmp = path.with_extension(format!(
@@ -345,31 +351,43 @@ fn set_dir_mode(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// 校验插件临时截图**文件**（体积 + 真实像素数），返回 PNG 的宽高。
+/// 读取插件临时截图的**全部字节**（有界），并做体积 + PNG 头校验，返回
+/// `(宽, 高, 字节)`。
+///
+/// **有界读取**（评审修复轮 P6 —— I5 的 TOCTOU 残留）：旧实现先
+/// `metadata().len()` 看体积、稍后再用 `fs::read` 读全文 —— 两次之间文件可能被
+/// 换掉（插件是本机进程，能改自己的临时文件）→ 64 MiB 上限只是**建议值**，
+/// 一个插件可以在闸与读之间把文件换成超大文件（DoS 面重新打开）。
+/// 现在改成 `File::open` + `Read::take(MAX_CAPTURE_BYTES + 1)` **一次读穿**：
+/// 读到的字节数就是真实体积，超限即拒 → 上限不可绕过，且**只读一次**
+/// （调用方直接拿这批字节去解码，不再二次 `fs::read`）。
 ///
 /// 两道闸都在**解码之前**：
-///   ① `metadata().len()` ≤ [`MAX_CAPTURE_BYTES`]（64 MiB）——防「超大文件被整个
-///      读进内存」；
+///   ① 读到的字节数 ≤ [`MAX_CAPTURE_BYTES`]（64 MiB）——防「超大文件被整个读进
+///      内存」；
 ///   ② 读 PNG 的 IHDR（头 24 字节）拿真实宽高，宽高积 ≤ [`MAX_CAPTURE_PIXELS`]
 ///      （40 MP）——防「解码时的内存尖峰」。
 ///
 /// 顺带确认「这确实是 PNG」（签名 + IHDR）——不是 PNG 的文件直接拒。
-pub fn validate_capture_file(path: &Path) -> Result<(u32, u32), String> {
-    let meta = fs::metadata(path).map_err(|e| format!("读取文件属性失败: {e}"))?;
-    if meta.len() > MAX_CAPTURE_BYTES {
+pub fn read_capture_bytes(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
+    use std::io::Read;
+    let file = fs::File::open(path).map_err(|e| format!("打开文件失败: {e}"))?;
+    // 最多读 MAX+1 字节：多读的那 1 字节就足以判定「超过上限」。
+    let mut limited = file.take(MAX_CAPTURE_BYTES + 1);
+    let mut buf = Vec::new();
+    limited
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("读取文件失败: {e}"))?;
+    if buf.len() as u64 > MAX_CAPTURE_BYTES {
         return Err(format!(
-            "文件过大（{} 字节 > {} 上限）",
-            meta.len(),
+            "文件过大（超过 {} 字节上限）",
             MAX_CAPTURE_BYTES
         ));
     }
-    let mut head = [0u8; 24];
-    {
-        use std::io::Read;
-        let mut f = fs::File::open(path).map_err(|e| format!("打开文件失败: {e}"))?;
-        f.read_exact(&mut head)
-            .map_err(|_| "文件过短（不是有效的 PNG）".to_string())?;
+    if buf.len() < 24 {
+        return Err("文件过短（不是有效的 PNG）".to_string());
     }
+    let head = &buf[..24];
     const PNG_SIG: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
     if head[..8] != PNG_SIG || &head[12..16] != b"IHDR" {
         return Err("不是有效的 PNG 文件".to_string());
@@ -385,7 +403,7 @@ pub fn validate_capture_file(path: &Path) -> Result<(u32, u32), String> {
             MAX_CAPTURE_PIXELS
         ));
     }
-    Ok((w, h))
+    Ok((w, h, buf))
 }
 
 /// 生成一次性令牌（32 位十六进制 = 128 bit）。
@@ -537,7 +555,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("hawksnap-plugin-dim.png");
         std::fs::write(&p, png_head(1920, 1080)).unwrap();
-        let (w, h) = validate_capture_file(&p).unwrap();
+        let (w, h, _bytes) = read_capture_bytes(&p).unwrap();
         assert_eq!((w, h), (1920, 1080));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -549,7 +567,7 @@ mod tests {
         let p = dir.join("hawksnap-plugin-huge.png");
         // 100000×100000 = 10^10 像素 → 超 40 MP 上限
         std::fs::write(&p, png_head(100_000, 100_000)).unwrap();
-        let e = validate_capture_file(&p).unwrap_err();
+        let e = read_capture_bytes(&p).unwrap_err();
         assert!(e.contains("像素数过大"), "实际: {e}");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -560,8 +578,42 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("hawksnap-plugin-bad.png");
         std::fs::write(&p, b"not a png at all, just text").unwrap();
-        let e = validate_capture_file(&p).unwrap_err();
+        let e = read_capture_bytes(&p).unwrap_err();
         assert!(e.contains("PNG"), "实际: {e}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn capture_bytes_returns_whole_file_and_dims() {
+        // 有界读取必须**读全**（不是只取 PNG 头）——调用方直接拿这批字节解码，
+        // 不再有第二次 fs::read（TOCTOU 窗口因此关闭，评审修复轮 P6）。
+        let dir = std::env::temp_dir().join(format!("hawksnap-np-bytes-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("hawksnap-plugin-bytes.png");
+        let mut data = png_head(3, 5);
+        data.extend_from_slice(&[0u8; 100]);
+        std::fs::write(&p, &data).unwrap();
+        let (w, h, bytes) = read_capture_bytes(&p).unwrap();
+        assert_eq!((w, h), (3, 5));
+        assert_eq!(bytes, data, "必须返回完整字节");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_secret_file_accepts_bare_relative_path() {
+        // 裸相对路径（"xxx.json"）的 parent() 是空路径 —— 旧实现会对 "" 调
+        // set_permissions → ENOENT → 写文件直接失败（评审修复轮 P10）。
+        let name = format!("hawksnap-np-rel-{}.json", std::process::id());
+        let p = Path::new(&name);
+        write_secret_file(p, "{\"ok\":true}").unwrap();
+        let text = fs::read_to_string(p).unwrap();
+        assert_eq!(text, "{\"ok\":true}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "裸相对路径也必须是 0600，实际: {mode:o}");
+        }
+        let _ = fs::remove_file(p);
     }
 }
