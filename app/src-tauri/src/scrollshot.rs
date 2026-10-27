@@ -534,8 +534,17 @@ pub fn scrollshot_force_stop(app: &AppHandle) {
 }
 
 /// 放弃长截图（前端「放弃」按钮）。
+///
+/// **收尾在飞行中 → 不打断**（终审 wave Minor e，与托盘「停止长截图」同款口径）：
+/// `scrollshot_force_stop` 会清掉会话槽；正在跑的收尾（拼接 + 落盘）拿到的是
+/// 会话内的画布，若此刻把会话抽走 → 收尾写到一半的产物状态不可预期，且提示条
+/// 被关掉、错误无处可显。托盘路径的写法是「不打断、什么都不做」，这里改成
+/// **返回错误文案**（前端把错误渲染在行内 → 用户知道为什么没反应）。
 #[tauri::command(async)]
 pub fn scrollshot_abort(app: AppHandle) -> Result<(), String> {
+    if scrollshot_stopping() {
+        return Err("长截图正在结束中，请稍候".to_string());
+    }
     scrollshot_force_stop(&app);
     Ok(())
 }
@@ -735,7 +744,9 @@ fn show_scrollshot_bar(app: &AppHandle, global: &hawksnap_platform_mac::windowca
     .always_on_top(true)
     .resizable(false)
     .skip_taskbar(true)
-    // 点击穿透：滚动页面的点击必须落到被拍的应用上（本窗只是提示）。
+    // **不点击穿透**（终审 wave Minor f：此前此处还留着「点击穿透」的过期注释，
+    // 与实际行为矛盾——整窗早已改为可交互，见下）。条是**刻意定位在避开选区的
+    // 上下边缘**的：被拍区域的点击不受影响。
     // 不抢键盘焦点（用户要滚动被拍的内容）——但**要能点**（I4：完成按钮是
     // ⌘S 不可用时的唯一鼠标出口；此前整窗点击穿透 → 无任何鼠标出口）。
     .focusable(false)

@@ -98,6 +98,20 @@ fn hide_countdown_window(app: &AppHandle) {
 #[tauri::command(async)]
 pub fn start_delayed_capture(app: AppHandle, secs: u64) -> Result<(), String> {
     let secs = validate_delay_secs(secs)?;
+    // —— 互斥守卫（终审 wave Minor c）——
+    // 延时截图到点后会走 start_capture_flow（截图流程）。旧实现**没有**前置守卫：
+    // 录屏中 / 长截图会话中启动延时倒计时 → 倒计时归零时 start_capture_flow 被
+    // 互斥守卫拒掉（截图/录制两套全屏 UI 不叠屏的规矩），但**用户看到的是**：
+    // 倒计时正常跑完、什么都没发生（错误只在进程内 eprintln，用户零反馈）。
+    // 现在入口直接拒绝并给出与其它入口同款文案（用户立刻知道为什么不能启动）。
+    if crate::recording::recording_active() {
+        return Err(super::flow::capture_guard_msg(true)
+            .unwrap_or("录屏进行中，请先停止录屏")
+            .to_string());
+    }
+    if crate::scrollshot::scrollshot_active() {
+        return Err(super::flow::scrollshot_guard_msg().to_string());
+    }
     // 先清 ABORT 再取门闩：若先取闩后清，「取闩到清之间」落下的 cancel 已把 ABORT 置
     // true 却被本轮复位覆盖——cancel 被静默抹掉，倒计时照跑。先清则该窗口内的 cancel
     // （门闩未取，cancel_delayed_capture 判非活动期返回 Err，良性）不会残留到本轮。

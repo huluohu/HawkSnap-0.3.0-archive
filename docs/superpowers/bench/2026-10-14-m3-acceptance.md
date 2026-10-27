@@ -188,3 +188,9 @@ open scripts/scrollshot-eval/pages/index.html     # 或用任意浏览器打开�
   不做推测性结论。
 - 0.3.0 的 eval 门槛余量只有 **0.5pp**（19/21 vs ≥18.9/21）——后续若再改拼接算法，
   任何「让某个场景变得更难」的改动都可能击穿门槛，须连同 eval 一起复核。
+- ⏳ **N3 遗留：画中画 `startRunning` 静默失败无健康信号**（N6 清单⑤，0.3.0 未收口）：
+  开启 PiP 后若 `startRunning` 静默失败（相机腿未点亮 / 授权未授予），悬浮条**不出现
+  任何提示**——用户看不到「PiP 没开成」，只会以为功能不存在。补法：enable 后数秒
+  `frames == 0` → 悬浮条给出提示（阈值需真机相机行为观察后确定，故本轮无法定值，
+  仍列为待办）。相关同批遗留见 `.superpowers/sdd/2026-10-14-hawksnap-m3-region-gif-pip-scrollshot/task-3-report.md`
+  的「N6 移交清单」。

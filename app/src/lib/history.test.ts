@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatShotDate, type ShotRow } from "./history";
+import { formatShotDate, shotKind, canReedit, type ShotRow } from "./history";
 
 describe("formatShotDate", () => {
   it("formats an RFC3339 timestamp for both locales", () => {
@@ -29,9 +29,40 @@ describe("formatShotDate", () => {
       w: 100,
       h: 50,
       app: "Safari",
+      kind: "region",
     };
     expect(Object.keys(row).sort()).toEqual([
-      "app", "createdAt", "h", "id", "path", "thumbPath", "w",
+      "app", "createdAt", "h", "id", "kind", "path", "thumbPath", "w",
     ]);
+  });
+});
+
+describe("shotKind / canReedit（终审 wave：kind 进契约 + 长截图禁重新编辑）", () => {
+  const base = {
+    id: 1,
+    createdAt: "2026-10-23T10:30:00+08:00",
+    path: "/pics/a.png",
+    thumbPath: "",
+    w: 100,
+    h: 50,
+    app: "App",
+  };
+
+  it("reads the kind column", () => {
+    expect(shotKind({ ...base, kind: "region" })).toBe("region");
+    expect(shotKind({ ...base, kind: "recording" })).toBe("recording");
+    expect(shotKind({ ...base, kind: "scrollshot" })).toBe("scrollshot");
+  });
+
+  it("falls back to the app column when kind is missing (旧库/旧响应)", () => {
+    expect(shotKind({ ...base, app: "recording" })).toBe("recording");
+    expect(shotKind({ ...base, app: "Safari" })).toBe("region");
+  });
+
+  it("gates re-edit on kind: recording and scrollshot are excluded", () => {
+    expect(canReedit({ ...base, kind: "region" })).toBe(true);
+    expect(canReedit({ ...base, kind: "recording" })).toBe(false);
+    // 长截图产物可达 32MP → 编辑器路径不支持（终审 wave I7）
+    expect(canReedit({ ...base, kind: "scrollshot" })).toBe(false);
   });
 });

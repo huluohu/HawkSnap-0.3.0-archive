@@ -20,5 +20,10 @@
 
 ## 本项目自身
 
-本仓库未附带 `LICENSE` 文件；HawkSnap 以**免费、纯本地**的形式发布。若分发二进制，请同时提供
-本仓库在该版本下的完整源码（AGPL 对应源码义务）。
+HawkSnap 整体作品以 **GNU AGPL-3.0-or-later** 授权——完整许可文本见仓库根的
+[`LICENSE`](LICENSE)（0.3.0 起随仓库提供；此前版本未附带该文件）。
+
+分发二进制时必须同时提供**对应源码**（AGPL-3.0-or-later §6）：本仓库在该版本下的完整源码
+（含 `Cargo.lock` = 构建脚本与依赖锁定信息），以及 Release 页面上的源码归档
+`HawkSnap-<tag>-source.tar.gz`（CI 由 `git archive` 从该 tag 生成）。HawkSnap 以
+**免费、纯本地**的形式发布。

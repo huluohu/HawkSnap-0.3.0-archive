@@ -17,8 +17,11 @@ import { t } from "../../lib/i18n";
 // **先拼接、成功后才收尾**（关条 + 注销热键 + 消费会话）→ 拼接失败时提示条
 // **仍然活着**，本行内错误槽才有地方渲染。两个错误来源都渲染到这里：
 // ① invoke 失败（Rust 返回 Err）；② Rust 直发 `hawk://scrollshot-error`
-// （不依赖 invoke 回流是否完好）。出现错误后条上多一枚「放弃」按钮 → 用户
-// 有出路（Rust 的 `scrollshot_abort` 强制丢弃会话）。
+// （不依赖 invoke 回流是否完好）。
+//
+// **「放弃」常驻**（终审 wave Minor d）：强制丢弃会话（Rust `scrollshot_abort`）
+// 的出口**始终在条上**——不只是出错后才有。正常进行中用户同样可能反悔
+//（「不要了」），那时条上必须有出口，而不是只能「完成」或等它自己停。
 export default function ScrollshotBarWindow() {
   const [frames, setFrames] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -171,12 +174,13 @@ export default function ScrollshotBarWindow() {
       >
         {t("scrollshot.bar.finish")}
       </button>
-      {/* 失败后才有「放弃」：Rust 的强制丢弃出口（失败后条仍在 → 用户有出路） */}
-      {error && (
-        <button style={btnDanger} onClick={abort} title={t("scrollshot.bar.abort")}>
-          {t("scrollshot.bar.abort")}
-        </button>
-      )}
+      {/* 「放弃」**常驻**（终审 wave Minor d）：旧实现只在出错后才渲染它——
+          正常进行中的会话没有任何「不要了」的出口（用户只能完成或等它自己停）。
+          条上的放弃 = 强制丢弃会话（Rust scrollshot_abort），常驻才符合「用户
+          随时能反悔」。失败后它同样在（同一按钮，语义不变）。 */}
+      <button style={btnDanger} onClick={abort} title={t("scrollshot.bar.abort")}>
+        {t("scrollshot.bar.abort")}
+      </button>
     </div>
   );
 }

@@ -8,7 +8,7 @@ import {
   subscribe,
   type LanguageSetting,
 } from "./lib/i18n";
-import { formatShotDate, type ShotRow } from "./lib/history";
+import { formatShotDate, shotKind, canReedit, type ShotRow } from "./lib/history";
 
 // —— 设置模型（C7）：与 Rust Settings（serde camelCase）逐字段对齐 ——
 interface Settings {
@@ -461,9 +461,10 @@ function App() {
                       loading="lazy"
                       style={thumb}
                     />
-                  ) : shot.app === "recording" ? (
+                  ) : shotKind(shot) === "recording" ? (
                     // 录屏条目（M6）：无缩略图 → 🎬 占位（贴图/重新编辑对 MP4 无意义，
-                    // 下方动作区隐藏；打开目录/删除照常）。
+                    // 下方动作区隐藏；打开目录/删除照常）。按 kind 判定（不再靠 app
+                    // 列复用——kind 已是契约字段）。
                     <div style={{ ...thumb, background: "#e9e9ee", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28 }} aria-hidden="true">🎬</div>
                   ) : (
                     <div style={{ ...thumb, background: "#e9e9ee" }} aria-hidden="true" />
@@ -487,8 +488,10 @@ function App() {
                       </button>
                     )}
                     {/* M2 Task M3：重新编辑启用——editor_open（origin=null）；录屏条目
-                        不提供（MP4 非编辑器输入，M6 裁定） */}
-                    {shot.app !== "recording" && (
+                        不提供（MP4 非编辑器输入，M6 裁定）；**长截图条目同样不提供**
+                        （终审 wave I7：长图可达 32MP，编辑器画布/导出路径按巨幅位图
+                        走会出内存尖峰与导出超时）。按 kind 门控。 */}
+                    {canReedit(shot) && (
                       <button style={tileBtn} onClick={() => reeditShot(shot.path)}>
                         {t("history.reedit")}
                       </button>

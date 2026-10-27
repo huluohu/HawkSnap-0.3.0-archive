@@ -89,9 +89,12 @@ export default function OverlayWindow() {
   // 提示横幅文案、确认路由到 scrollshot_start（进入滚动采集会话）、动作浮条缺席。
   const scrollshotMode = display?.intent === "scrollshot";
   const [recordError, setRecordError] = useState<string | null>(null);
-  // N2 输出格式（录制横幅分段开关，默认 MP4）：覆盖层窗口常驻复用 → 该选择**跨
-  // 轮保持**（用户偏好惯性——连录多条 GIF 时不逐轮重选；新一轮 payload 到达不重置，
-  // 与 pickerMode/recordError 的「每轮清态」不同）。
+  // N2 输出格式（录制横幅分段开关，默认 MP4）。**每轮选区流程复位**（终审 review
+  // wave I3）：覆盖层窗口常驻复用 → 该 state 跨轮存活；旧实现把它留到下一轮，
+  // 导致「上一轮选过的格式」无声地套用到本次录制——尤其在长截图轮里用户**根本
+  // 看不到**这个开关（该轮只渲染长截图自己的提示），它的值却决定了下一条录像是
+  // MP4 还是 GIF。现在每轮 payload 到达即复位为默认 MP4 → 格式永远是**本轮显式**
+  // 的选择，不可能泄漏到用户没看见它的轮次。
   const [recordFormat, setRecordFormat] = useState<"mp4" | "gif">("mp4");
 
   // —— M2 Task M5 取色器（Snipaste 式）——
@@ -324,6 +327,9 @@ export default function OverlayWindow() {
         setCopied(null);
         // N1：清上一轮的录制启动错误（新一轮 payload 到达 = 覆盖层复活，横幅回到提示态）
         setRecordError(null);
+        // N2 输出格式复位为默认 MP4（终审 review wave I3）：格式是**本轮显式**的选择，
+        // 上一轮的值不得泄漏到本轮（长截图轮更是完全看不到这个开关）。
+        setRecordFormat("mp4");
         if (copiedTimerRef.current !== null) {
           window.clearTimeout(copiedTimerRef.current);
           copiedTimerRef.current = null;
@@ -659,7 +665,12 @@ export default function OverlayWindow() {
       {/* N1 录制模式提示横幅：与截图模式唯一的常驻视觉差异（选区视觉刻意一致）。
           N2：横幅右侧追加 MP4/GIF 分段开关（输出格式在录制开始前选择，确认时随
           record_start_region 下发；格式选中态为高亮胶囊）。录制启动失败时整组替换
-          为红色行内错误（覆盖层保留可重试）。 */}
+          为红色行内错误（覆盖层保留可重试）。
+          —— 终审 review wave I3：**只在 recordMode 渲染**。旧实现把本组渲染在
+          `(recordMode || scrollshotMode)` 上 → 长截图轮里同时出现「录制」横幅和
+          长截图横幅（两者都是 fixed top:12px left:50% → 叠字），且那个 MP4/GIF
+          开关在长截图轮里**毫无用处**（长截图不产出 MP4/GIF），它改的 state 却会
+          顺延到下一轮录制。长截图轮现在只有自己的提示条。 */}
       {/* N5 长截图模式提示横幅：与截图/录制同款视觉，仅文案不同（选区 UI 刻意一致）。 */}
       {scrollshotMode && !recordError && (
         <div style={{ position: "fixed", top: 12, left: "50%", transform: "translateX(-50%)",
@@ -669,38 +680,40 @@ export default function OverlayWindow() {
           {t("scrollshot.hint")}
         </div>
       )}
-      {(recordMode || scrollshotMode) && (
-        recordError ? (
-          <div style={{ position: "fixed", top: 12, left: "50%", transform: "translateX(-50%)",
-            zIndex: 10, pointerEvents: "none", background: "#0D1522",
-            border: "1px solid #5B2430", borderRadius: 8, padding: "4px 12px",
-            fontSize: 12, color: "#E5484D", maxWidth: "80vw" }}>{recordError}</div>
-        ) : (
-          <div style={{ position: "fixed", top: 12, left: "50%", transform: "translateX(-50%)",
-            zIndex: 10, display: "flex", gap: 8, alignItems: "center" }}>
-            <div style={{ background: "#0D1522", border: "1px solid #22405F", borderRadius: 8,
-              padding: "4px 12px", fontSize: 12, color: "#D8E2EE", pointerEvents: "none" }}>
-              {t("overlay.record.hint")}
-            </div>
-            <div role="group" style={{ display: "flex", background: "#0D1522",
-              border: "1px solid #22405F", borderRadius: 8, overflow: "hidden" }}>
-              {([
-                { id: "mp4" as const, label: t("record.format.mp4") },
-                { id: "gif" as const, label: t("record.format.gif") },
-              ]).map(({ id, label }) => (
-                <button key={id} type="button" aria-pressed={recordFormat === id}
-                  onClick={() => setRecordFormat(id)}
-                  style={{ padding: "4px 10px", fontSize: 12, lineHeight: "16px",
-                    cursor: "pointer", border: "none",
-                    background: recordFormat === id ? "#22405F" : "transparent",
-                    color: recordFormat === id ? "#FFFFFF" : "#8A8F98" }}>
-                  {label}
-                </button>
+      {/* 行内错误（录制启动失败 / 长截图启动失败）：两种模式共用同一插槽，
+          位置与提示条同（fixed top:12px left:50%）→ 与提示条互斥（同一时刻
+          只可能有一个：提示条在无错误时渲染，错误出现时替换它）。 */}
+      {(recordMode || scrollshotMode) && recordError && (
+        <div style={{ position: "fixed", top: 12, left: "50%", transform: "translateX(-50%)",
+          zIndex: 10, pointerEvents: "none", background: "#0D1522",
+          border: "1px solid #5B2430", borderRadius: 8, padding: "4px 12px",
+          fontSize: 12, color: "#E5484D", maxWidth: "80vw" }}>{recordError}</div>
+      )}
+      {recordMode && !recordError && (
+        <div style={{ position: "fixed", top: 12, left: "50%", transform: "translateX(-50%)",
+          zIndex: 10, display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ background: "#0D1522", border: "1px solid #22405F", borderRadius: 8,
+            padding: "4px 12px", fontSize: 12, color: "#D8E2EE", pointerEvents: "none" }}>
+            {t("overlay.record.hint")}
+          </div>
+          <div role="group" style={{ display: "flex", background: "#0D1522",
+            border: "1px solid #22405F", borderRadius: 8, overflow: "hidden" }}>
+            {([
+              { id: "mp4" as const, label: t("record.format.mp4") },
+              { id: "gif" as const, label: t("record.format.gif") },
+            ]).map(({ id, label }) => (
+              <button key={id} type="button" aria-pressed={recordFormat === id}
+                onClick={() => setRecordFormat(id)}
+                style={{ padding: "4px 10px", fontSize: 12, lineHeight: "16px",
+                  cursor: "pointer", border: "none",
+                  background: recordFormat === id ? "#22405F" : "transparent",
+                  color: recordFormat === id ? "#FFFFFF" : "#8A8F98" }}>
+                {label}
+              </button>
               ))}
             </div>
           </div>
-        )
-      )}
+        )}
       {/* 选区确认浮条：canvas 的兄弟节点（fixed 定位）。pointer/dblclick 处理器都只挂在
           canvas 元素上，浮条内的 mousedown/双击按构造不进入选区状态机——既不清选区也不
           触发拖拽/双击确认。Enter 缺省 confirm() = "copy"（语义裁定：保存须显式点按钮）。

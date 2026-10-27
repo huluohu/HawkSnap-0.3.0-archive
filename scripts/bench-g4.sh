@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # scripts/bench-g4.sh — G4 验收基准（plan D5）：冷启动→托盘 ≤800ms；主面板打开 ≤300ms。
 #
+# 姊妹脚本：G3 延迟基准 = scripts/bench-latency.sh（同一「应用内建仪器 + 读
+# stderr」口径：HAWKSNAP_BENCH=N 自跑 N 轮、进程内算 P90，单命令出两个数）。
+#
 # 原理：以 HAWKSNAP_G4=1 启动 HawkSnap，应用在托盘就绪后自动打开主面板并自动退出
 # （g4.rs），stderr 输出一行 `[g4] cold_start=..ms panel=..ms`。本脚本连跑 N 次
 # （默认 5），取中位数 + 最近秩 P90，对目标线（≤800ms / ≤300ms）给出判定。

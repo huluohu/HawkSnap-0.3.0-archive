@@ -13,6 +13,14 @@ pub struct ShotRow {
     pub w: i64,
     pub h: i64,
     pub app: String,
+    /// 条目种类（终审 wave：原先该列**只写不读**——「语义面在 schema，不进前端
+    /// 契约」）。现在暴露给前端：历史网格的「重新编辑」资格、录屏占位图等按 kind
+    /// 门控（此前靠 app 列冒充 kind，见 recording.rs 的 "recording" 复用）。
+    /// 取值：`region`（截图）/ `recording`（录屏 MP4/GIF）/ `scrollshot`（长截图）。
+    /// `default` 兼容旧消费方（缺字段按空串补齐；旧库该列 NOT NULL DEFAULT，
+    /// 实际不会为空）。
+    #[serde(default)]
+    pub kind: String,
     /// 录制时长（秒，REAL；M3 继承项①新增）。截图（region/scrollshot）为 NULL →
     /// None；仅 kind=recording 有值。`default` 兼容旧消费方（缺字段按 null 补齐）。
     #[serde(default)]
@@ -157,7 +165,10 @@ pub fn init(app: &AppHandle) -> Result<(), String> {
 }
 
 /// C3 保留策略上限（M3 N0 起单源于此）：入库成功后裁剪至最新 500 条，所有 kind
-/// 平权（region / recording / 未来的 scrollshot 同一预算）。
+/// **行预算**平权（region / recording / scrollshot 同一预算）。
+///
+/// 媒体口径（终审 wave I6）：裁剪**只删行**；截图 / 长截图条目连带删文件，
+/// **录制条目保留媒体文件**（用户的 MP4/GIF 产物不是缓存，不被自动裁剪静默删除）。
 const KEEP_MAX: i64 = 500;
 
 pub fn record(
@@ -214,7 +225,7 @@ pub(crate) fn list_at(db: &std::path::Path, limit: i64, offset: i64) -> Result<V
     let conn = open_at(db)?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, created_at, path, thumb_path, w, h, app, duration FROM shots
+            "SELECT id, created_at, path, thumb_path, w, h, app, kind, duration FROM shots
              ORDER BY id DESC LIMIT ?1 OFFSET ?2",
         )
         .map_err(|e| e.to_string())?;
@@ -228,7 +239,8 @@ pub(crate) fn list_at(db: &std::path::Path, limit: i64, offset: i64) -> Result<V
                 w: r.get(4)?,
                 h: r.get(5)?,
                 app: r.get(6)?,
-                duration: r.get(7)?,
+                kind: r.get(7)?,
+                duration: r.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -259,7 +271,7 @@ pub(crate) fn search_at(db: &std::path::Path, query: &str, limit: i64) -> Result
     let conn = open_at(db)?;
     let mut stmt = conn
         .prepare(
-            "SELECT s.id, s.created_at, s.path, s.thumb_path, s.w, s.h, s.app, s.duration
+            "SELECT s.id, s.created_at, s.path, s.thumb_path, s.w, s.h, s.app, s.kind, s.duration
              FROM shots_fts
              JOIN shots s ON s.id = shots_fts.rowid
              WHERE shots_fts MATCH ?1
@@ -278,7 +290,8 @@ pub(crate) fn search_at(db: &std::path::Path, query: &str, limit: i64) -> Result
                 w: r.get(4)?,
                 h: r.get(5)?,
                 app: r.get(6)?,
-                duration: r.get(7)?,
+                kind: r.get(7)?,
+                duration: r.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -308,7 +321,23 @@ pub(crate) fn set_ocr_text_at(db: &std::path::Path, path: &str, text: &str) -> R
 
 /// 删行 + 删两个文件（文件已不在（NotFound）忽略——行存在而文件丢失是合法状态：
 /// 用户可手动清理截图目录，历史条目仍可删）。
+///
+/// **用户显式删除**路径（history_delete / 网格「删除」按钮）：行与媒体文件一起删。
+/// 录制的 MP4/GIF 也删——用户明确表达「不要了」，留着就成孤儿文件（~/Movies/HawkSnap
+/// 里再也清不掉）。**自动裁剪**路径（[`prune_at`）的口径不同：那里永不删录制媒体。
 pub(crate) fn delete_at(db: &std::path::Path, id: i64) -> Result<(), String> {
+    delete_row_at(db, id, false)
+}
+
+/// 删一行；`keep_media = true` 时**只删行、保留媒体文件**（自动裁剪路径用）。
+///
+/// `keep_media` 由调用方按该行的 kind 决定（kind 从库里读回——该列此前「只写不读」，
+/// 现在是裁剪策略的唯一判据）。
+pub(crate) fn delete_row_at(
+    db: &std::path::Path,
+    id: i64,
+    keep_media: bool,
+) -> Result<(), String> {
     let conn = open_at(db)?;
     let (path, thumb): (String, String) = conn
         .query_row("SELECT path, thumb_path FROM shots WHERE id = ?1", [id], |r| {
@@ -317,6 +346,11 @@ pub(crate) fn delete_at(db: &std::path::Path, id: i64) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM shots WHERE id = ?1", [id])
         .map_err(|e| e.to_string())?;
+    if keep_media {
+        // 媒体保留：文件留在原处（用户 ~/Movies/HawkSnap 里的 MP4/GIF 不被自动裁剪
+        // 悄悄删掉——那是用户自己的录制产物，不是缓存）。
+        return Ok(());
+    }
     for p in [path, thumb] {
         if p.is_empty() {
             continue;
@@ -330,9 +364,25 @@ pub(crate) fn delete_at(db: &std::path::Path, id: i64) -> Result<(), String> {
     Ok(())
 }
 
-/// 保留最新 max 条：id 大于第 max 新的行的条目逐条 delete（连带删文件）。
+/// 读回一行的 kind（该列此前「只写不读」；现在是裁剪策略与前端门控的唯一判据）。
+fn kind_of(db: &std::path::Path, id: i64) -> Result<String, String> {
+    let conn = open_at(db)?;
+    conn.query_row("SELECT kind FROM shots WHERE id = ?1", [id], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())
+}
+
+/// 保留最新 max 条：id 大于第 max 新的行的条目逐条 delete。
+///
 /// 生产入口 = [`record_at`] 的内置裁剪（M3 继承项①单点化：KEEP_MAX 对所有 kind
-/// 平权，record 是唯一入库口，录屏/长截图绕不过）；本函数保留 crate 内可测形态。
+/// **行预算**平权，record 是唯一入库口，录屏/长截图绕不过）；本函数保留 crate 内
+/// 可测形态。
+///
+/// **媒体口径（终审 wave I6）**：行预算仍是 500 条（对所有 kind 一视同仁），但
+/// **自动裁剪永不删除 kind='recording' 的媒体文件**——只丢历史行，MP4/GIF 留在
+/// `~/Movies/HawkSnap`。旧实现对所有 kind 一律连带删文件 → 用户攒到第 501 条时，
+/// 早期的录屏产物在磁盘上被静默删除（用户不知情、文件不可恢复）。
+/// 其他 kind（截图 / 长截图）维持原口径：连带删文件（它们是缓存性质的产物，
+/// 可从原始内容重建价值低；长图同理）。
 pub(crate) fn prune_at(db: &std::path::Path, max: i64) -> Result<(), String> {
     let conn = open_at(db)?;
     let mut stmt = conn
@@ -345,12 +395,15 @@ pub(crate) fn prune_at(db: &std::path::Path, max: i64) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     drop(stmt);
     drop(conn);
-    // 保留最新 max 条（id 最大的 max 个），其余逐条 delete（连带删文件）。
+    // 保留最新 max 条（id 最大的 max 个），其余逐条 delete。
     for id in ids.into_iter().skip(max.max(0) as usize) {
-        delete_at(db, id)?;
+        // 录制条目：只删行、保留媒体文件（用户的录制产物不是缓存）。
+        let keep_media = kind_of(db, id).map(|k| k == "recording").unwrap_or(false);
+        delete_row_at(db, id, keep_media)?;
     }
     Ok(())
 }
+
 
 /// M0：limit/offset 可选（前端省略时 200/0——面板首屏口径不变）。
 #[tauri::command]
@@ -483,6 +536,42 @@ mod tests {
         assert!(kept.contains(&ids[5]), "最新的保留");
         assert!(!dir.join("p0.png").exists(), "最旧的文件连带删除");
         assert!(dir.join("p5.png").exists(), "保留条目的文件不动");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// 终审 wave I6：自动裁剪**永不删录制媒体**——行预算对所有 kind 平权（500 条），
+    /// 但 kind='recording' 的行被裁掉时，其 MP4/GIF 文件留在磁盘上（用户的录制
+    /// 产物不是缓存，不能被静默删除）。用户**显式**删除该条目仍会删文件
+    /// （delete_at = 用户意图，媒体不留孤儿）。
+    #[test]
+    fn prune_keeps_recording_media_on_disk() {
+        let dir = temp_dir("prune-recording");
+        let db = dir.join("history.db");
+        // 1 条最早的截图 + 3 条录制 + 3 条最新截图（共 7 条）。
+        let old_shot = real_png(&dir, "old.png");
+        record_at(&db, old_shot.to_str().unwrap(), "", 10, 10, "App", "region", None).unwrap();
+        for i in 0..3 {
+            let mp4 = real_png(&dir, &format!("rec{i}.mp4"));
+            record_at(&db, mp4.to_str().unwrap(), "", 100, 100, "recording", "recording", Some(3.0)).unwrap();
+        }
+        for i in 0..3 {
+            let png = real_png(&dir, &format!("shot{i}.png"));
+            record_at(&db, png.to_str().unwrap(), "", 10, 10, "App", "region", None).unwrap();
+        }
+        // 行预算 3 → 保留最新 3 条（3 条最新截图），裁掉最早的 4 条（1 截图 + 3 录制）。
+        prune_at(&db, 3).unwrap();
+        let rows = list_at(&db, 100, 0).unwrap();
+        assert_eq!(rows.len(), 3, "行预算对所有 kind 平权（保留最新 3 条）");
+        assert!(rows.iter().all(|r| r.kind == "region"), "被裁掉的是 3 条录制 + 1 条旧截图");
+        for i in 0..3 {
+            assert!(dir.join(format!("rec{i}.mp4")).exists(), "录制媒体文件不被自动裁剪删除");
+            assert!(dir.join(format!("shot{i}.png")).exists(), "保留条目的文件不动");
+        }
+        assert!(!old_shot.exists(), "截图文件仍按原口径连带删除");
+        // 用户显式删除录制条目 → 文件一并删除（不留孤儿）。
+        let rec_row = record_at(&db, dir.join("manual.mp4").to_str().unwrap(), "", 10, 10, "recording", "recording", Some(1.0)).unwrap();
+        delete_at(&db, rec_row).unwrap();
+        assert!(!dir.join("manual.mp4").exists(), "用户显式删除仍删媒体文件");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -752,7 +841,8 @@ mod tests {
         // 新→旧：rec 在前（duration=12.5），region 在后（duration=None）
         assert_eq!(rows[0].duration, Some(12.5), "录制行 duration 为秒数");
         assert_eq!(rows[1].duration, None, "截图行 duration 为 NULL");
-        // kind 列直查（ShotRow 刻意不暴露 kind——语义面在 schema，不进前端契约）
+        // kind 列直查 + **前端契约面**：ShotRow 现在暴露 kind（终审 wave：前端按
+        // kind 门控「重新编辑」等动作，不再靠 app 列冒充）。
         let conn = Connection::open(&db).unwrap();
         let kinds: Vec<String> = conn
             .prepare("SELECT kind FROM shots ORDER BY id")
@@ -762,6 +852,9 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(kinds, vec!["region", "recording"]);
+        // 前端契约：ShotRow.kind 直接可读（region / recording）。
+        assert_eq!(rows[0].kind, "recording");
+        assert_eq!(rows[1].kind, "region");
         // duration 语义入库即生效：老行（迁移库）读回 NULL 不炸
         assert!(search_at(&db, "rec.mp4", 10).unwrap()[0].duration == Some(12.5));
         std::fs::remove_dir_all(&dir).unwrap();
@@ -808,8 +901,13 @@ mod tests {
     }
 
     /// M3 继承项①（prune 平权）：prune 已移入 record 本体——入库超过 KEEP_MAX 即
-    /// 自动裁剪到最新 500 条（连带删文件），任何 kind 一致。这是「录屏入库绕过
-    /// prune」缺陷的结构性收口：record 是唯一入库口，绕不过。
+    /// 自动裁剪到最新 500 条，任何 kind 一致。这是「录屏入库绕过 prune」缺陷的
+    /// 结构性收口：record 是唯一入库口，绕不过。
+    ///
+    /// 终审 wave I6 追加口径：**行预算平权，但媒体不跟着删**——本测试的条目
+    /// kind='recording' → 裁剪只删行、保留媒体文件（截图类条目的连带删文件由
+    /// `prune_keeps_newest_max` 覆盖，录制媒体的保留由
+    /// `prune_keeps_recording_media_on_disk` 覆盖）。
     #[test]
     fn record_prunes_beyond_keep_max() {
         let dir = temp_dir("record-prune");
@@ -817,7 +915,7 @@ mod tests {
         let mut first = None;
         let mut last = None;
         for i in 0..=KEEP_MAX {
-            // 首尾条目配真文件，断言最旧被连带删、最新保留
+            // 首尾条目配真文件，断言最旧被裁、最新保留
             let png = if i == 0 || i == KEEP_MAX as i64 {
                 Some(real_png(&dir, &format!("edge{i}.png")))
             } else {
@@ -837,7 +935,10 @@ mod tests {
         assert_eq!(rows.len() as i64, KEEP_MAX, "恰好保留最新 500 条");
         let (first_id, first_path) = first.unwrap();
         assert!(!rows.iter().any(|r| r.id == first_id), "最旧一条被裁");
-        assert!(!std::path::Path::new(&first_path).exists(), "最旧条目的文件连带删除");
+        assert!(
+            std::path::Path::new(&first_path).exists(),
+            "录制条目的媒体文件不被自动裁剪删除（只删行，留文件）"
+        );
         assert!(rows.iter().any(|r| r.id == last.unwrap()), "最新一条保留");
         std::fs::remove_dir_all(&dir).unwrap();
     }
