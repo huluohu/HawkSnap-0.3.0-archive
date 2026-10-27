@@ -6,15 +6,34 @@ HawkSnap 是一款免费、纯本地的轻量级截屏工具，基于 Tauri 2 + 
 
 ## 平台支持
 
-| 平台 | 编译 | 采集能力（截图 / 录屏 / 贴图 / 长截图 / 按键显示） | 二进制分发 |
-| --- | --- | --- | --- |
-| macOS 12.3+（Intel / Apple Silicon） | ✅ | ✅ **功能完整** | ✅（当前唯一发布平台） |
-| Linux（Ubuntu 22.04 / 24.04） | ✅（M4 跨平台重构后） | ❌ **尚未适配**——相关入口明确报错 | ❌ |
-| Windows（Win10 1903+ / Win11） | ✅（同上） | ❌ **尚未适配**——同上 | ❌ |
+| 平台 | 编译 | 截图（区域 / 窗口 / 全屏） | 录屏 / 画中画 / 长截图 / 贴图 / 按键显示 | 二进制分发 |
+| --- | --- | --- | --- | --- |
+| macOS 12.3+（Intel / Apple Silicon） | ✅ | ✅ **功能完整** | ✅ **功能完整** | ✅（当前唯一发布平台） |
+| Linux（Ubuntu 22.04 / 24.04） | ✅（M4 跨平台重构后） | ⚠️ **走跨平台 xcap 后端**（区域 / 全屏；X11 下可能可用，**未适配、未实测**；窗口自动识别为 macOS 专属） | ❌ **macOS 专属**——相关入口明确报错 | ❌ |
+| Windows（Win10 1903+ / Win11） | ✅（同上） | ⚠️ **走跨平台 xcap 后端**（区域 / 全屏；可能可用，**未适配、未实测**；窗口自动识别为 macOS 专属） | ❌ **macOS 专属**——同上 | ❌ |
 
-**Linux / Windows 当前只保证「能编译、能跑测」**：macOS 专属的采集栈（ScreenCaptureKit / AVFoundation / AppKit 绑定）在这些平台上不存在，相关代码按 `#[cfg(target_os = "macos")]` 门控，并以**同名同签名**的平台桩替代——调用即返回明确错误（「该平台暂不支持」），**绝不静默假装成功**；历史库 / OCR / 编辑器 / 设置等与平台无关的部分照常可用。
+**Linux / Windows 当前只保证「能编译、能跑测」**，采集能力分两类：
+
+- **截图（区域 / 窗口 / 全屏）走跨平台 xcap 后端**——xcap 在 Linux X11 与 Windows 上
+  均有实现，故截图入口在这些平台上**不会被平台桩拦下**，而是会真的发起一次抓屏：
+  Linux X11 / Windows **可能可用**，但 HawkSnap **未适配、未实测**（权限模型、缩放与
+  多屏语义均未逐项验证），故按「不承诺可用」标注；其中**窗口的自动识别**（悬停选窗
+  / 磁吸候选）依赖 macOS 专有的 CGWindowList，非 macOS 返回空候选 → 降级为手动画框；
+- **录屏 / 画中画 / 长截图 / 贴图 / 按键显示是 macOS 专属能力**——其底层栈
+  （ScreenCaptureKit / AVFoundation / AppKit 绑定 / CGEventTap）在这些平台上不存在，
+  相关代码按 `#[cfg(target_os = "macos")]` 门控，并以**同名同签名**的平台桩替代——
+  调用即返回明确错误（「该平台暂不支持」），**绝不静默假装成功**；
+
+历史库 / OCR / 编辑器 / 设置等与平台无关的部分照常可用。
 
 真正的平台适配（Windows 抓屏与全局热键、Linux X11 录屏与窗口枚举、Wayland 走 portal 等，见设计文档 §6.3 平台验收矩阵）留待后续里程碑。
+
+**CI 门禁分档**：macOS 与 Linux 腿是**硬门**（均已在真实 runner 上跑绿）；Windows 腿
+**首轮为非阻塞平台验证**（`continue-on-error`）——该腿从未在 Windows runner 上执行过，
+WebView2 SDK（构建期）、xcap 的 Windows 后端（与 X11 不同的代码路径）、rusqlite
+bundled 的 MSVC 依赖、路径 / 临时目录语义（`%TEMP%`、反斜杠）等未知项都是真实的。
+**翻门条件：Windows 腿首次跑绿即改为硬门**（去掉 workflow 里的
+`continue-on-error`），并同步更新本节与 workflow 注释。
 
 ## 当前进度
 
@@ -48,7 +67,7 @@ Plan D——i18n、自动更新、权限引导与发布基建：
 - 自动更新：tauri-plugin-updater + Ed25519 签名的 GitHub Releases 更新通道，设置区「自动更新」开关与「检查更新」按钮，坏签名更新包拒绝安装（伪签名集成测试断言）；
 - macOS 权限引导：截图前预检「屏幕录制」权限，未授权时深链系统设置并显示横幅（修复此前 macOS 14+ 未授权时静默返回壁纸画面的缺陷）；
 - 热键单一真源、bench 注入守卫等 Plan C 终审继承项收口；
-- CI 矩阵（macOS / Windows / Linux：cargo test + 前端测试 + i18n 门禁；clippy 暂缓接入，安装包体积断言仅 macOS）。**跨平台编译重构（M4）已完成**：`hawksnap-platform-mac` 的 macOS 专属依赖（objc2*/screen-capture-kit/av-foundation/block2/dispatch2）已按 target 门控，模块与平台 API 逐项 `#[cfg(target_os = "macos")]`，非 macOS 平台提供同名同签名的**桩**（明确 Err / 空值降级，绝不静默假装成功）——Linux / Windows 现已可编译、可跑测，CI 三平台测试腿均为**硬门**（不再允许失败）。**发布仍为 macOS-only**（跨平台分发需另定打包 / 签名 / 更新 feed 口径）：打 tag 触发 macOS 构建发布 + **对应源码包**（AGPL §6）上传，并组装签名更新 feed。
+- CI 矩阵（macOS / Windows / Linux：cargo test + 前端测试 + i18n 门禁；clippy 暂缓接入，安装包体积断言仅 macOS）。**跨平台编译重构（M4）已完成**：`hawksnap-platform-mac` 的 macOS 专属依赖（objc2*/screen-capture-kit/av-foundation/block2/dispatch2）已按 target 门控，模块与平台 API 逐项 `#[cfg(target_os = "macos")]`，非 macOS 平台提供同名同签名的**桩**（明确 Err / 空值降级，绝不静默假装成功）——Linux / Windows 现已可编译、可跑测。CI 门禁分档：macOS / Linux 为**硬门**；**Windows 腿首轮为非阻塞平台验证**（`continue-on-error`，从未在 Windows runner 上执行过 → 首轮绿后翻硬门，详见「平台支持」一节）。**发布仍为 macOS-only**（跨平台分发需另定打包 / 签名 / 更新 feed 口径）：打 tag 触发 macOS 构建发布 + **对应源码包**（AGPL §6）上传，并组装签名更新 feed。
 
 配套（性能仪器，单命令口径）：G3 延迟用 `bash scripts/bench-latency.sh`——脚本自己以 `HAWKSNAP_BENCH=20` 启动应用（基准模式自动跑 20 轮真实的「捕获 → 覆盖层 → 确认 → 剪贴板」链路，**进程内计时、无键鼠注入**），读应用 stderr 的两行 P90（`[bench] h2o P90 = …ms` / `[bench] c2c P90 = …ms`）并按目标线（h2o ≤150ms / c2c ≤100ms）判定；`scripts/bench-synth.sh` 是同一口径的免人工按键入口。G4 冷启动 / 开面板用 `bash scripts/bench-g4.sh`（`HAWKSNAP_G4=1` 自测仪器，stderr 输出一行 `cold_start=..ms panel=..ms`）；G2 空载内存用 `scripts/sample-mem.sh`。打点原始 CSV **只在基准 / G4 模式下落盘**（生产运行零写入）。安装包体积预算 ≤15MB，由 `scripts/check-size.sh` 断言。
 
@@ -88,7 +107,7 @@ HawkSnap 整体作品以 **GNU AGPL-3.0-or-later** 授权（完整文本见仓�
 
 ## 后续计划
 
-见 [docs/superpowers/plans/](docs/superpowers/plans/)（M1 出口 0.1.0；M2 标注 / OCR / 录屏出口 0.2.0；M3 区域录制 / GIF / 画中画 / 按键显示 / 长截图出口 0.3.0；麦克风混音、窗口录制、Rust 侧文案 i18n 等在后续里程碑另立文档）。**M4 已完成跨平台编译重构**（`hawksnap-platform-mac` 按 target 门控 + 平台桩 → Linux / Windows 恢复可编译，CI 三平台真门）；后续项：Linux / Windows 的**平台适配与分发**（打包 / 签名 / 更新 feed 口径）——恢复发布矩阵前需先定分发口径。
+见 [docs/superpowers/plans/](docs/superpowers/plans/)（M1 出口 0.1.0；M2 标注 / OCR / 录屏出口 0.2.0；M3 区域录制 / GIF / 画中画 / 按键显示 / 长截图出口 0.3.0；麦克风混音、窗口录制、Rust 侧文案 i18n 等在后续里程碑另立文档）。**M4 已完成跨平台编译重构**（`hawksnap-platform-mac` 按 target 门控 + 平台桩 → Linux / Windows 恢复可编译；CI：macOS / Linux 硬门，Windows 首轮非阻塞验证后翻硬门）；后续项：Linux / Windows 的**平台适配与分发**（打包 / 签名 / 更新 feed 口径）——恢复发布矩阵前需先定分发口径。
 
 ## 开发环境
 
@@ -142,7 +161,7 @@ macOS 默认把 F1 当作亮度降低键（「将 F1、F2 等键用作标准功�
 - **历史库自动裁剪**：历史条目上限 500 条（对所有 kind 平权）。裁剪时截图 / 长截图条目连带删除文件，但**录制条目只删历史行、保留 MP4 / GIF 文件**（用户的录制产物不是缓存）；用户在网格里**手动删除**某个录制条目时，文件仍会一并删除；
 - **长截图条目不提供「重新编辑」**：长图可达 32MP（实测输出高 20145–23912px），编辑器画布 / 导出路径按巨幅位图走会出内存尖峰与导出超时（长图后处理归后续版本）；
 - 画中画的相机 16:9 画幅经 cover-crop（居中裁方）入圆、不变形；
-- **0.3.0 仅 macOS 提供二进制**：跨平台**编译**已通（M4 重构：Linux / Windows 可编译、可跑测，CI 三平台测试腿均为硬门），但跨平台**分发**未启动（Windows / Linux 的打包、代码签名与更新 feed 口径另案裁定）；非 macOS 平台的采集功能当前为「明确拒绝」而非可用（见「平台支持」一节）；
+- **0.3.0 仅 macOS 提供二进制**：跨平台**编译**已通（M4 重构：Linux / Windows 可编译、可跑测；CI 门禁 macOS / Linux 硬门，Windows 首轮非阻塞验证后翻硬门），但跨平台**分发**未启动（Windows / Linux 的打包、代码签名与更新 feed 口径另案裁定）；非 macOS 平台的采集能力**分两类**——**截图**（区域 / 窗口 / 全屏）走跨平台 xcap 后端（Linux X11 / Windows 可能可用，未适配未实测）；**录屏 / 画中画 / 长截图 / 贴图 / 按键显示**为 macOS 专属，其它平台「明确拒绝」而非可用（见「平台支持」一节）；
 - 72 小时长时录屏稳定性（G5）自 M2 起测；
 - 错误提示等 Rust 侧文案暂为中文（界面已双语，Rust 侧 i18n 归后续版本）；
 - 热键冲突时仅提示保存失败，不列出占用该热键的其他应用（macOS 无公开 API），自动候选键建议留 M2 评估。

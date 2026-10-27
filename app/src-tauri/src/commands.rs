@@ -1,3 +1,15 @@
+// —— 非 macOS 平台放行约定（M4 P0 评审修复轮）——
+//
+// 本文件含 macOS 专属能力（录屏 / 画中画 / 贴图 / 按键显示 / 长截图 等）。非 macOS
+// 构建下这些项**无人调用**——这是「能力缺席」的正常结果，不是代码缺陷。故按项逐个
+// 放行：`#[cfg_attr(not(target_os = "macos"), allow(dead_code))]`（仅 macOS 分支才用
+// 的局部变量用 `unused_variables`，仅 macOS 才用的导入用 `unused_imports`）。
+//
+// **逐项**放行而非 crate 级 blanket allow：crate 级 `allow(dead_code, unused_*)`
+// 会把**未来新增**的同类问题一并吞掉；逐项放行后，新增项若在非 macOS 上真的无人用，
+// 依然照报。macOS 构建下这些属性恒不生效（`not(target_os = "macos")` 为假）——
+// macOS 的 lint 纪律零变化。
+
 use hawksnap_core::capture::ScreenGrabber;
 use hawksnap_core::geometry::Rect;
 use hawksnap_core::{crop::{crop_rgba, rgba_to_png}, naming::{expand, NamingCtx}};
@@ -223,7 +235,7 @@ pub async fn hide_overlays_after_annotate(app: AppHandle) -> Result<(), String> 
     crate::overlay::hide_all_overlays(&app)
 }
 
-/// 标注临时 PNG 落盘（M2 Task M3，纯函数可测）：`$TMPDIR/hawksnap-annotate-{ts}-{seq}.png`。
+/// 标注临时 PNG 落盘（M2 Task M3，纯函数可测）：`$TMPDIR/hawksnap-annotate-{ms}-{seq}.png`。
 /// 命名必须**保证**不互撞：毫秒时间戳单独用并不够——同一毫秒内的两次标注（小图 +
 /// 快机器）会撞名，后写覆盖先写（编辑器可能拿到别轮的图）。故追加进程内单调序号
 /// （`fetch_add` 原子，跨线程唯一）；文件无人主动清理（临时目录系统管理，编辑器
@@ -276,6 +288,7 @@ pub struct DisplayFrame { pub x: f64, pub y: f64, pub w: f64, pub h: f64 }
 /// 同源）。CAPTURES 按轮覆盖写同 display_id，读到的总是最近一轮捕获的几何；陈旧
 /// display（用户拔掉显示器后未再触发新一轮）可能残留，但覆盖层不可见时悬停总闸早已
 /// 短路，残留帧至多影响下一轮首帧前的窗口期，属可接受降级。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn captured_display_frames() -> Vec<DisplayFrame> {
     let Ok(captures) = CAPTURES.try_lock() else { return Vec::new() };
     captures
@@ -291,6 +304,7 @@ pub(crate) fn captured_display_frames() -> Vec<DisplayFrame> {
 /// 与 [`captured_display_frames`] 同源（CAPTURES 几何条目），区别只在于按
 /// display_id 精确取一份而非全部。释放整帧（release_captures）后几何仍在——
 /// 长截图启动时覆盖层尚未收口，正是要读它。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn captured_display_geometry(display_id: u64) -> Option<DisplayFrame> {
     let captures = CAPTURES.lock().unwrap_or_else(|e| e.into_inner());
     captures.get(&display_id).map(|m| DisplayFrame {
@@ -323,6 +337,7 @@ pub(crate) fn primary_display() -> Option<(u64, DisplayFrame)> {
 /// 贴图 pin 的图像来源第一级（C5）：CAPTURES 最近一轮的非空整帧。display_id 取最大者
 /// （多显示器无主次概念时稳定取一个）；release_captures 后 rgba 全为空 → None，调用方
 /// 落到剪贴板来源。锁内只做 Arc clone + 几何拷贝，不跨 IO。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) struct LatestCapture {
     pub rgba: std::sync::Arc<Vec<u8>>,
     pub w_px: u32,
@@ -330,6 +345,7 @@ pub(crate) struct LatestCapture {
     pub scale: f64,
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn latest_capture_rgba() -> Option<LatestCapture> {
     let captures = CAPTURES.lock().unwrap_or_else(|e| e.into_inner());
     captures
@@ -528,7 +544,7 @@ mod tests {
 
     #[test]
     fn annotate_temp_png_roundtrips_with_dims_and_unique_names() {
-        // M2 Task M3「标注」入口的落盘半程：$TMPDIR/hawksnap-annotate-{ts}.png，
+        // M2 Task M3「标注」入口的落盘半程：$TMPDIR/hawksnap-annotate-{ms}-{seq}.png，
         // 字节可解回同 dims（编辑器按 asset 协议装载该文件），两次落盘文件名不撞。
         let p1 = write_annotate_png(&[9, 8, 7, 255, 6, 5, 4, 255], 2, 1).unwrap();
         assert!(p1.to_string_lossy().contains("hawksnap-annotate-"));

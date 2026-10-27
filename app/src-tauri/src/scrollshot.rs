@@ -32,6 +32,18 @@
 //!   才收尾**（关条 + 注销热键 + 消费会话）。拼接失败 → 会话与提示条**都留着**
 //!   → 错误双通道可见（提示条行内 + 横幅），用户可重试或点「放弃」强制收尾。
 
+// —— 非 macOS 平台放行约定（M4 P0 评审修复轮）——
+//
+// 本文件含 macOS 专属能力（录屏 / 画中画 / 贴图 / 按键显示 / 长截图 等）。非 macOS
+// 构建下这些项**无人调用**——这是「能力缺席」的正常结果，不是代码缺陷。故按项逐个
+// 放行：`#[cfg_attr(not(target_os = "macos"), allow(dead_code))]`（仅 macOS 分支才用
+// 的局部变量用 `unused_variables`，仅 macOS 才用的导入用 `unused_imports`）。
+//
+// **逐项**放行而非 crate 级 blanket allow：crate 级 `allow(dead_code, unused_*)`
+// 会把**未来新增**的同类问题一并吞掉；逐项放行后，新增项若在非 macOS 上真的无人用，
+// 依然照报。macOS 构建下这些属性恒不生效（`not(target_os = "macos")` 为假）——
+// macOS 的 lint 纪律零变化。
+
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -43,14 +55,19 @@ use hawksnap_core::scrollshot::{resolve_shift, StallDetector, StopOutcome};
 use hawksnap_core::stitch::{Frame, Stitched, Stitcher};
 
 /// 采集间隔（plan 裁定：500ms）——**基准间隔**。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const CAPTURE_INTERVAL: Duration = Duration::from_millis(500);
 /// 快速滚动时的加密采集间隔（见 [`pacing_params`] → core `Pacing` 的滞回规则）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const CAPTURE_INTERVAL_FAST: Duration = Duration::from_millis(200);
 /// 判定「滚得快」的位移阈值（相对选区高度）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const FAST_SHIFT_RATIO: f64 = 0.4;
 /// 判定「滚得慢」的位移阈值（相对选区高度）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const SLOW_SHIFT_RATIO: f64 = 0.2;
 /// 首帧延迟：给「隐藏覆盖层」留出时间（覆盖层是带遮罩的全屏窗——被拍进去就毁了）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const FIRST_FRAME_DELAY: Duration = Duration::from_millis(250);
 /// **停滞检测**窗口（**墙钟**，评审 Minor：动效页 / 慢速滚动误报）。
 ///
@@ -60,6 +77,7 @@ const FIRST_FRAME_DELAY: Duration = Duration::from_millis(250);
 /// 现改为**墙钟窗口**（≥3s，与节奏无关）+ 「内容**确实测不出**」才判定
 /// （规则本体在 core：[`hawksnap_core::scrollshot::StallDetector`]，可在
 /// Linux 上单测）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const STALL_WINDOW: Duration = Duration::from_secs(3);
 // 采集期**不留帧队列**（M5）：每帧采集后立即参与匹配与合成、随即释放。
 //
@@ -80,7 +98,9 @@ const FINISH_COMBO: &str = "Cmd+S";
 /// 提示条窗口标签（**ACL 按标签授权**——capabilities/scrollshot-bar.json 必须存在，
 /// 否则 listen 被 ACL 拒绝、提示条永远收不到帧数）。
 const BAR_LABEL: &str = "scrollshot-bar";
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const BAR_W: f64 = 360.0;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const BAR_H: f64 = 64.0;
 
 // ---------------------------------------------------------------------------
@@ -91,6 +111,7 @@ struct Session {
     /// 会话号（单调）：前端据此清上一会话的行内错误残留。
     session: u64,
     /// 全局逻辑矩形（Quartz points）——采集区域。
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     global: hawksnap_platform_mac::windowcap::GlobalRect,
     /// 选区全局矩形（提示条定位用：避开选区，防被拍进内容）。
     /// **流式拼接器**：每帧采集后立即参与匹配与合成，随即释放 → **不留帧队列**
@@ -111,6 +132,7 @@ struct Session {
 
 impl Session {
     /// 喂一帧给流式拼接器（匹配 + 合成，随即释放）。
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn push_frame(&self, frame: Frame) {
         let mut guard = self.stitcher.lock().unwrap_or_else(|e| e.into_inner());
         if guard.is_none() {
@@ -137,6 +159,7 @@ impl Session {
     /// 采集节奏的自适应依据（I1）：必须用**当前帧**的测量值，而不是上一张被
     /// 接受帧的滞后值——后者在匹配失败时会停在旧值上（拿旧位移决定下一拍间隔
     /// → 越滚越快 → 重叠耗尽 → 配对失配）。
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn measured_shift(&self) -> Option<i32> {
         self.stitcher
             .lock()
@@ -146,6 +169,7 @@ impl Session {
     }
 
     /// 画布是否已触到内存上界（true = 长图被截断，应停止采集）。
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn truncated(&self) -> bool {
         self.stitcher
             .lock()
@@ -158,6 +182,7 @@ impl Session {
     /// **当前画布高度**（像素）——已合成进去的内容高度。
     ///
     /// 停滞检测的依据：高度不再增长 = 新帧没被接受（匹配失败）→ 链已断。
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn canvas_height(&self) -> usize {
         self.stitcher
             .lock()
@@ -168,6 +193,7 @@ impl Session {
     }
 
     /// 本会话可产出的最大长图高度（像素）。
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn max_height(&self) -> usize {
         self.stitcher
             .lock()
@@ -203,6 +229,7 @@ impl Session {
 static SESSION: Mutex<Option<Arc<Session>>> = Mutex::new(None);
 
 /// 会话号单调计数（每次成功启动取号 +1）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 static SESSION_SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn lock_session() -> std::sync::MutexGuard<'static, Option<Arc<Session>>> {
@@ -232,6 +259,7 @@ pub fn scrollshot_stopping() -> bool {
 /// 位移来源 = 拼接器刚做的测量（[`hawksnap_core::stitch::Stitcher::measured_shift`]，
 /// 与链上用的是**同一个**三层匹配器）——不再单独跑 1D 行谱（1D 在准周期内容上
 /// 会咬住假峰：实测真解 678px 被 524px 假峰盖过 → 节奏按假位移调 → 步长失控）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn pacing_params() -> hawksnap_core::scrollshot::Pacing {
     hawksnap_core::scrollshot::Pacing::new(
         CAPTURE_INTERVAL,
@@ -248,6 +276,7 @@ fn pacing_params() -> hawksnap_core::scrollshot::Pacing {
 /// tick 载荷（提示条渲染输入）。
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub struct ScrollshotTick {
     pub session: u64,
     pub frames: usize,
@@ -292,8 +321,10 @@ pub struct ScrollshotError {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScrollshotReq {
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub display_id: u64,
     /// display 本地逻辑坐标选区（与 finish_capture 的 FinishReq.rect 同系同源）。
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub rect: Rect,
 }
 
@@ -566,6 +597,7 @@ pub fn scrollshot_status() -> Option<ScrollshotStatus> {
 // 采集线程
 // ---------------------------------------------------------------------------
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn spawn_capture_thread(app: AppHandle, session: Arc<Session>) {
     std::thread::spawn(move || {
         // 首帧延迟：覆盖层 hide 是投递给主线程的异步消息，留出时间避免拍到遮罩。
@@ -653,6 +685,7 @@ fn spawn_capture_thread(app: AppHandle, session: Arc<Session>) {
     });
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn emit_tick(app: &AppHandle, session: &Session) {
     let _ = app.emit(
         "hawk://scrollshot-tick",
@@ -673,6 +706,7 @@ fn emit_tick(app: &AppHandle, session: &Session) {
 /// 没有按钮）→ 采集线程会一直跑到队列上限。故失败时：
 /// ① 走既有横幅通道告知用户；
 /// ② 提示条改为**可交互**（显示「完成」按钮），保证始终有鼠标出口。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn register_finish_hotkey(app: &AppHandle) -> bool {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
     let handle = app.clone();
@@ -728,6 +762,7 @@ fn unregister_finish_hotkey(app: &AppHandle) {
 /// **位置刻意避开选区**：屏幕兜底抓取路径会把「屏幕上真实可见的像素」拍进去，
 /// 提示条若压在选区上就会在长图里留下自己的残影。选区在上下都避开时，退到
 /// 底边（与 keycast 同款，让开 Dock）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn show_scrollshot_bar(app: &AppHandle, global: &hawksnap_platform_mac::windowcap::GlobalRect) -> Result<(), String> {
     if let Some(w) = app.get_webview_window(BAR_LABEL) {
         position_bar(&w, global);
@@ -761,6 +796,7 @@ fn show_scrollshot_bar(app: &AppHandle, global: &hawksnap_platform_mac::windowca
 }
 
 /// 提示条定位：优先避开选区的上下边，都避开不了才压边。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn position_bar(w: &tauri::WebviewWindow, global: &hawksnap_platform_mac::windowcap::GlobalRect) {
     let Ok(Some(m)) = w.primary_monitor() else {
         let _ = w.center();

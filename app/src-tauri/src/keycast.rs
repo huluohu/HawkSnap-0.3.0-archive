@@ -50,9 +50,22 @@
 //!   `set_ignore_cursor_events` 只管鼠标、键盘靠 focusable 兜。实证见
 //!   `src/bin/keycast-focus-probe.rs`（可见 + `canBecomeKeyWindow=false`）。
 
+// —— 非 macOS 平台放行约定（M4 P0 评审修复轮）——
+//
+// 本文件含 macOS 专属能力（录屏 / 画中画 / 贴图 / 按键显示 / 长截图 等）。非 macOS
+// 构建下这些项**无人调用**——这是「能力缺席」的正常结果，不是代码缺陷。故按项逐个
+// 放行：`#[cfg_attr(not(target_os = "macos"), allow(dead_code))]`（仅 macOS 分支才用
+// 的局部变量用 `unused_variables`，仅 macOS 才用的导入用 `unused_imports`）。
+//
+// **逐项**放行而非 crate 级 blanket allow：crate 级 `allow(dead_code, unused_*)`
+// 会把**未来新增**的同类问题一并吞掉；逐项放行后，新增项若在非 macOS 上真的无人用，
+// 依然照报。macOS 构建下这些属性恒不生效（`not(target_os = "macos")` 为假）——
+// macOS 的 lint 纪律零变化。
+
 use serde::Serialize;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 // ---------------------------------------------------------------------------
@@ -64,6 +77,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 /// PageUp/PageDown、常用标点、修饰键本体（⌘⇧⌥⌃⇪fn，keyDown 形式到达时如实显示）、
 /// 音量三键。**未知键码 → "Key{code}"**（F 键区段外与媒体键优雅兜底——契约裁定）。
 /// 纯函数：单 match 表驱动，测试见 keycast_tests。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn keycode_display_name(code: u16) -> String {
     let named: Option<&str> = match code {
         // 字母（kVK_ANSI_A..Z；键码非字母序，QWERTY 物理布局）
@@ -165,6 +179,7 @@ pub fn keycode_display_name(code: u16) -> String {
 /// （大写锁定激活态）与 Function（fn 修饰——F 键语义随它翻转但显示仍按 F 键名）
 /// 不参与组合显示。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub struct Mods {
     pub cmd: bool,
     pub shift: bool,
@@ -173,11 +188,16 @@ pub struct Mods {
 }
 
 /// kCGEventFlagMaskCommand / Shift / Alternate / Control（CGEventTypes.h）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const FLAG_CMD: u64 = 1 << 20;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const FLAG_SHIFT: u64 = 1 << 17;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const FLAG_ALT: u64 = 1 << 19;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const FLAG_CTRL: u64 = 1 << 18;
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn parse_flags(flags: u64) -> Mods {
     Mods {
         cmd: flags & FLAG_CMD != 0,
@@ -191,6 +211,7 @@ pub fn parse_flags(flags: u64) -> Mods {
 /// 自身按下」的显示去重（见 [`format_key_event`]）——旗标前缀已含该修饰符时，
 /// 键名位置不再重复打印同一符号（否则 ⌘ 键按下显示 "⌘⌘"）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub enum ModifierRole {
     Cmd,
     Shift,
@@ -199,6 +220,7 @@ pub enum ModifierRole {
 }
 
 /// 键码 → 修饰键角色（非修饰键 → None）。左右修饰键同角色（0x36 右 ⌘ 等）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn modifier_role(code: u16) -> Option<ModifierRole> {
     match code {
         0x37 | 0x36 => Some(ModifierRole::Cmd), // command / right command
@@ -211,6 +233,7 @@ pub fn modifier_role(code: u16) -> Option<ModifierRole> {
 
 /// 组合格式化（纯函数，契约裁定修饰符序 **Cmd ⇧ ⌥ ⌃**）：无修饰符 → 键名原样；
 /// 有修饰符 → 按序前缀（例：Ctrl+Alt+A → "⌥⌃A"，全修饰 → "⌘⇧⌥⌃A"）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn format_combo(mods: Mods, key: &str) -> String {
     let mut s = String::new();
     if mods.cmd {
@@ -234,6 +257,7 @@ pub fn format_combo(mods: Mods, key: &str) -> String {
 /// 规则：普通键 → [`format_combo`]（旗标前缀 + 键名）。**修饰键自身**按下 → 旗标
 /// 快照通常已含该修饰符（按下即生效），前缀会再打一遍同一符号（"⌘⌘"）——此时
 /// 抑制该位的前缀、由键名位置打一次（"⌘"）；其余旗标保留（⌘+⇧ 期间按 ⌘ → "⇧⌘"）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn format_key_event(mods: Mods, code: u16) -> String {
     let name = keycode_display_name(code);
     let Some(role) = modifier_role(code) else {
@@ -264,17 +288,20 @@ pub fn format_key_event(mods: Mods, code: u16) -> String {
 /// 基准推后，连续重复永不越过窗口 → **长按只显示一次**；停手后再次按下（距上次
 /// 尝试 >100ms）才重新显示。不同组合立即放行（快速连打零延迟）。
 #[derive(Debug)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) struct ComboThrottle {
     window: Duration,
     last: Option<(String, Instant)>,
 }
 
 impl ComboThrottle {
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn new(window: Duration) -> Self {
         Self { window, last: None }
     }
 
     /// 该组合此刻是否应显示（是 → 记录新基准；否 → 抑制但**仍刷新基准**）。
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn allow(&mut self, combo: &str, now: Instant) -> bool {
         let dup = matches!(
             &self.last,
@@ -286,6 +313,7 @@ impl ComboThrottle {
 }
 
 /// 100ms 合并窗（契约值；常量便于测试引用）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const THROTTLE_WINDOW: Duration = Duration::from_millis(100);
 
 /// keycast 生命周期决策（纯函数可测）：`active` = tap 当前是否装机；`recording` =
@@ -306,6 +334,7 @@ pub fn keycast_action(active: bool, recording: bool, enable: bool) -> Result<Opt
 /// hawk://keycast 载荷（plan：{combo, ts}；ts = Unix 毫秒，前端当前不用、留作
 /// 语义完整——显示时长由 CSS 动画单源控制）。
 #[derive(Serialize, Clone)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub struct KeycastEvent {
     pub combo: String,
     pub ts: i64,
@@ -534,7 +563,9 @@ fn active_now() -> bool {
 }
 
 const KEYCAST_LABEL: &str = "keycast";
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const KEYCAST_W: f64 = 320.0;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const KEYCAST_H: f64 = 88.0;
 
 /// 按键显示开关（悬浮条按钮入口）。enabled=true：录制未进行 → Err（悬浮条只在
@@ -627,6 +658,7 @@ fn on_key_down(app: &AppHandle, code: u16, flags: u64) {
     }
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn unix_millis() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -638,6 +670,7 @@ fn unix_millis() -> i64 {
 /// 320×88 透明 + always_on_top + 点击穿透（set_ignore_cursor_events——录屏中
 /// 用户点击必须落到前台应用）。位置：主显示器**底部居中**（悬浮条在顶部居中，
 /// 两窗不相交；底部上收 120 物理 px ≈ 80 逻辑 px 让开 Dock）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn show_keycast_window(app: &AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window(KEYCAST_LABEL) {
         position_keycast(&w);
@@ -671,6 +704,7 @@ fn show_keycast_window(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn position_keycast(w: &tauri::WebviewWindow) {
     if let Some(m) = w.primary_monitor().ok().flatten() {
         let size = w

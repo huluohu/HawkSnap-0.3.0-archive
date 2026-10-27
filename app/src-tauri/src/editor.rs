@@ -16,7 +16,7 @@
 //!   （`pins::pin_set_image_rgba` → PinWindow::set_image 换图，窗口位置/缩放保持；
 //!   贴图已被关闭的竞态静默忽略）。下一次双击装载的就是新图。
 //! - 覆盖层「标注」（commands::annotate_crop）：`origin=Capture`——编辑器装载
-//!   `$TMPDIR/hawksnap-annotate-{ts}.png`；保存（裁定细化）= ①自动复制到剪贴板
+//!   `$TMPDIR/hawksnap-annotate-{ms}-{seq}.png`；保存（裁定细化）= ①自动复制到剪贴板
 //!   （spec「来源=截图 → 自动复制到剪贴板」）；②另存 PNG 副本到 save_dir 并入库
 //!   （record_history，与普通截图同一产品模型；恒 PNG——编辑器导出即 PNG，重编码
 //!   JPEG 破坏 F5 像素一致，output_format 设置不适用于此路径）。剪贴板失败向上报错

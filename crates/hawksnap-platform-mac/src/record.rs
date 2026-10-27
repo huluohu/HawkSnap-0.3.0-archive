@@ -2357,7 +2357,13 @@ fn settings_dict(
 #[cfg(not(target_os = "macos"))]
 const UNSUPPORTED: &str = "该平台暂不支持（录屏能力当前仅 macOS 提供）";
 
-/// 主显示器 id：非 macOS 无显示器查询能力 → 返回 0（无效 id；调用方应先判能力）。
+/// 主显示器 id：非 macOS 无显示器查询能力 → 返回 **0**。
+///
+/// **0 是无效的显示器 id**（macOS 的 `CGMainDisplayID()` 永不为 0；显示 id 由
+/// 系统分配、从 1 起）。故 0 在此**只表示「能力缺席」**，绝不是「第一个显示器」。
+/// 调用方**必须先判能力**再使用该值——直接把它当 display_id 传给录制 / 坐标换算
+/// 会落到「显示器 0 不存在」的路径，得到误导性的失败。非 macOS 上正确用法是先查
+/// 能力（如 `ScreenRecorder::start` 的 Err），能力缺席即拒绝，不进入依赖 id 的分支。
 #[cfg(not(target_os = "macos"))]
 pub fn main_display_id() -> u32 {
     0
@@ -3528,4 +3534,108 @@ mod tests {
     // —— N3 F9 端到端（#[ignore]）：经 pip-f9-probe 子进程（动窗驱动 30fps 交付 +
     // 相机/注入源合成）→ pts 连续性 + PiP 区域运动熵断言。见 src/bin/pip-f9-probe.rs
     // 与 tests/real_pip_recording.rs（probe 载体与 swift 抽帧工具在那边断言）。
+}
+
+// ---------------------------------------------------------------------------
+// 非 macOS 平台桩的单测（M4 P0 评审补充）
+//
+// 桩是「能力缺席」的对外契约面：调用方（app 层命令、悬浮条）依赖「明确 Err +
+// 状态零变化」这一不变量，才不会在非 macOS 上留下半启会话或假状态。故在此把
+// 契约钉成断言——桩语义未来被改坏时（如误改成 Ok、误改了状态更新顺序），
+// 本组测试先红。
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, not(target_os = "macos")))]
+mod stub_tests {
+    use super::*;
+
+    /// 四个启动入口 + stop 一律 Err(UNSUPPORTED)：非 macOS 上不得出现「看似启动
+    /// 成功」的会话（那会让 app 层的 REC 装进一个空壳，stop 时才炸）。
+    #[test]
+    fn screen_recorder_start_variants_all_reject() {
+        let lane = std::sync::Arc::new(PipLane::new());
+        let gif = std::sync::Arc::new(GifLane::new());
+        let out = std::path::PathBuf::from("/tmp/hawksnap-stub-should-not-exist.mp4");
+        let region = LogicalRect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 };
+
+        let errs = [
+            ScreenRecorder::start(out.clone(), Some(lane.clone())).err(),
+            ScreenRecorder::start_gif(out.clone(), gif.clone(), Some(lane.clone())).err(),
+            ScreenRecorder::start_region(out.clone(), 1, region, Some(lane.clone())).err(),
+            ScreenRecorder::start_region_gif(out.clone(), 1, region, gif, Some(lane)).err(),
+        ];
+        for e in errs {
+            let e = e.expect("非 macOS 的启动入口必须 Err");
+            assert_eq!(e, UNSUPPORTED, "错误文案必须是统一的「能力缺席」信号");
+        }
+        // 拒绝不得落盘任何产物。
+        assert!(!out.exists(), "被拒绝的启动不得留下输出文件");
+    }
+
+    /// stop 亦 Err（无会话可收）——不是 Ok，否则调用方会拿到一个编造的 RecordingInfo。
+    #[test]
+    fn screen_recorder_stop_rejects_without_session() {
+        let rec = ScreenRecorder;
+        assert_eq!(rec.stop().unwrap_err(), UNSUPPORTED);
+        assert!(rec.info().is_none());
+        assert!(rec.take_error().is_none());
+    }
+
+    /// PipLane::update(visible=true) → Err 且**状态零变化**（相机缺席不得留下
+    /// 「visible=true 但没画面」的假状态）。
+    #[test]
+    fn pip_lane_visible_true_rejects_without_state_change() {
+        let lane = PipLane::new();
+        let before = lane.state();
+        let err = lane
+            .update(PipUpdate { visible: Some(true), ..Default::default() })
+            .unwrap_err();
+        assert_eq!(err, UNSUPPORTED);
+        assert_eq!(lane.state(), before, "被拒绝的更新不得改动状态");
+        assert!(!lane.state().visible);
+        assert!(!lane.camera_running());
+        assert_eq!(lane.camera_frames(), 0);
+    }
+
+    /// 非法几何参数（size = NaN / ≤ 0、x/y 非有限）→ Err 且状态零变化
+    /// （整包拒绝：不允许「一半更新一半失败」）。
+    #[test]
+    fn pip_lane_invalid_geometry_rejects_without_state_change() {
+        let lane = PipLane::new();
+        let before = lane.state();
+        for bad_size in [f64::NAN, 0.0, -1.0] {
+            let err = lane
+                .update(PipUpdate { size: Some(bad_size), ..Default::default() })
+                .unwrap_err();
+            assert!(err.contains("尺寸非法"), "size={bad_size} 应报尺寸非法: {err}");
+        }
+        let err = lane
+            .update(PipUpdate { x: Some(Some(f64::NAN)), ..Default::default() })
+            .unwrap_err();
+        assert!(err.contains("x 坐标非法"), "x=NaN 应报坐标非法: {err}");
+        let err = lane
+            .update(PipUpdate { y: Some(Some(f64::INFINITY)), ..Default::default() })
+            .unwrap_err();
+        assert!(err.contains("y 坐标非法"), "y=inf 应报坐标非法: {err}");
+        assert_eq!(lane.state(), before, "被拒绝的更新不得改动状态");
+    }
+
+    /// 合法部分更新在非 macOS 上照常生效（桩保留了状态语义，不是全拒）。
+    #[test]
+    fn pip_lane_valid_update_still_applies() {
+        let lane = PipLane::new();
+        lane.update(PipUpdate { x: Some(Some(12.0)), size: Some(120.0), ..Default::default() })
+            .expect("合法部分更新应成功");
+        let st = lane.state();
+        assert_eq!(st.x, Some(12.0));
+        assert_eq!(st.size, 120.0);
+        assert!(!st.visible);
+    }
+
+    /// main_display_id() 在非 macOS 返回 0 = **无效显示器 id**（能力缺席信号，
+    /// 不是「第一个显示器」）——见该函数的文档注释。
+    #[test]
+    fn main_display_id_is_invalid_zero_on_non_macos() {
+        assert_eq!(main_display_id(), 0, "非 macOS 无显示器查询能力 → 无效 id 0");
+    }
 }

@@ -1,3 +1,15 @@
+// —— 非 macOS 平台放行约定（M4 P0 评审修复轮）——
+//
+// 本文件含 macOS 专属能力（录屏 / 画中画 / 贴图 / 按键显示 / 长截图 等）。非 macOS
+// 构建下这些项**无人调用**——这是「能力缺席」的正常结果，不是代码缺陷。故按项逐个
+// 放行：`#[cfg_attr(not(target_os = "macos"), allow(dead_code))]`（仅 macOS 分支才用
+// 的局部变量用 `unused_variables`，仅 macOS 才用的导入用 `unused_imports`）。
+//
+// **逐项**放行而非 crate 级 blanket allow：crate 级 `allow(dead_code, unused_*)`
+// 会把**未来新增**的同类问题一并吞掉；逐项放行后，新增项若在非 macOS 上真的无人用，
+// 依然照报。macOS 构建下这些属性恒不生效（`not(target_os = "macos")` 为假）——
+// macOS 的 lint 纪律零变化。
+
 use serde::Serialize;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -290,9 +302,11 @@ pub fn register_media_key_f1(app: &AppHandle) -> Result<(), String> {
 pub(crate) mod media {
     /// NSEvent systemDefined 的 data1：高 16 位 = NX 键类型；低 16 位 = flags
     /// （0x0A00=按下 / 0x0B00=释放，详见 parse_media_key 注）。
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub const NX_KEYTYPE_BRIGHTNESS_DOWN: i64 = 22;
 
     #[derive(Debug, PartialEq)]
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub enum MediaKey {
         BrightnessDown,
     }
@@ -303,6 +317,7 @@ pub(crate) mod media {
     /// `0x0A00`（真实硬件/系统事件，SPMediaKeyTap/Chromium/MonitorControl 一致采用：
     /// `((flags & 0xFF00) >> 8) == 0xA`）与 `0x000A`（本模块测试契约）。两者都接受；
     /// keyUp（`0x0B00` / `0x000B`）与其余键类型一律 None。
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub fn parse_media_key(data1: i64) -> Option<MediaKey> {
         let key = (data1 & 0xFFFF_0000) >> 16;
         let flags = data1 & 0x0000_FFFF;
@@ -318,6 +333,7 @@ pub(crate) mod media {
     /// false=媒体键模式。`capture_combo` 是当前设置的截图热键（D0-① 单一来源，默认 F1），
     /// 只用于句首回显实际组合；后半句是 macOS 系统设置的原文案（Apple UI 字符串，不随
     /// 配置变化）。
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub fn fnstate_hint(fnstate: Option<bool>, capture_combo: &str) -> Option<String> {
         match fnstate {
             Some(true) => None,

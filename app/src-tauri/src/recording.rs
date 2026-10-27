@@ -31,12 +31,28 @@
 //! 系统声（SCStream `capturesAudio`）进 AAC 音轨；**麦克风 M6 不做**（AVAudioEngine
 //! tap + 双路混音过深，计划预授权 ladder 的该项裁定，列 M2.1/M3）。
 
+// —— 非 macOS 平台放行约定（M4 P0 评审修复轮）——
+//
+// 本文件含 macOS 专属能力（录屏 / 画中画 / 贴图 / 按键显示 / 长截图 等）。非 macOS
+// 构建下这些项**无人调用**——这是「能力缺席」的正常结果，不是代码缺陷。故按项逐个
+// 放行：`#[cfg_attr(not(target_os = "macos"), allow(dead_code))]`（仅 macOS 分支才用
+// 的局部变量用 `unused_variables`，仅 macOS 才用的导入用 `unused_imports`）。
+//
+// **逐项**放行而非 crate 级 blanket allow：crate 级 `allow(dead_code, unused_*)`
+// 会把**未来新增**的同类问题一并吞掉；逐项放行后，新增项若在非 macOS 上真的无人用，
+// 依然照报。macOS 构建下这些属性恒不生效（`not(target_os = "macos")` 为假）——
+// macOS 的 lint 纪律零变化。
+
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use hawksnap_core::geometry::Rect;
+// 输出路径生成只在 macOS 分支里被调用（record_start / record_start_region 的
+// 录制体整段 `#[cfg(target_os = "macos")]`），非 macOS 构建下本导入无人使用 →
+// 按 target 门控，避免占用 crate 级 unused_imports 放行额度。
+#[cfg(target_os = "macos")]
 use hawksnap_platform_mac::record::recording_output_path;
 
 #[cfg(target_os = "macos")]
@@ -51,7 +67,9 @@ use hawksnap_platform_mac::record::{PipLane, PipUpdate};
 /// 零变化（无抽帧热路径成本）；GIF = MP4 管线原样 + 旁路抽帧通道（gif.rs 编码）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordFormat {
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Mp4,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Gif,
 }
 
@@ -67,6 +85,7 @@ impl RecordFormat {
 
 /// 解析命令入参（纯函数可测）：大小写不敏感；非法值显式拒绝（不静默降级——
 /// 用户选了 GIF 却录出 MP4 是错误行为）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn parse_record_format(s: &str) -> Result<RecordFormat, String> {
     match s.trim().to_ascii_lowercase().as_str() {
         "mp4" => Ok(RecordFormat::Mp4),
@@ -136,6 +155,7 @@ pub fn recorded_secs(active: Duration, paused_total: Duration, current_pause: Op
 // ---------------------------------------------------------------------------
 
 struct RecRuntime {
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     session: u64,
     phase: Phase,
     started_at: Instant,
@@ -165,6 +185,7 @@ static REC: Mutex<Option<RecRuntime>> = Mutex::new(None);
 /// session 变化识别「新会话」并清除上一会话的行内错误（M6 遗留 minor：失败文案跨
 /// 会话残留）。Relaxed 足够：仅需唯一 + 单调，取号在 REC 锁内（启动天然串行），
 /// 载荷同步由事件通道自身保证。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 static SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn lock_rec() -> std::sync::MutexGuard<'static, Option<RecRuntime>> {
@@ -190,6 +211,7 @@ pub fn f6_start_guard_msg(overlay_visible: bool) -> Option<&'static str> {
 /// hawk://record-tick 载荷（悬浮条渲染输入；单词字段无需 rename）。
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 struct RecordTick {
     /// 会话号（record_start/record_start_region 单调取号）：前端据此清上一会话的错误残留。
     session: u64,
@@ -242,6 +264,7 @@ pub fn record_status() -> Option<RecordStatus> {
 // 输出目录：~/Movies/HawkSnap（spec §3.4；dirs_picture_dir 同款跨平台 HOME 口径）
 // ---------------------------------------------------------------------------
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn movies_dir() -> Option<std::path::PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
@@ -255,6 +278,7 @@ fn movies_dir() -> Option<std::path::PathBuf> {
 /// F6 / 悬浮条入口：启动全屏（主显示器）录制 + 拉起悬浮条 + 启动 tick 广播。
 /// N2：`format` = "mp4"|"gif"（None/缺省 = mp4——API 兼容路径的既有调用方零变化）。
 #[tauri::command(async)]
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 pub fn record_start(app: AppHandle, format: Option<String>) -> Result<(), String> {
     // 平台门槛（范围裁定）：录屏管线仅 macOS；其余平台显式拒绝（不静默）。
     #[cfg(not(target_os = "macos"))]
@@ -383,11 +407,14 @@ pub fn record_start(app: AppHandle, format: Option<String>) -> Result<(), String
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegionReq {
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub display_id: u64,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub rect: Rect,
     /// N2：输出格式（"mp4"|"gif"）。serde default = "mp4"——旧载荷（N1 契约）
     /// 缺字段时按 MP4 走，前端可渐进接入。
     #[serde(default = "default_region_format")]
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub format: String,
 }
 
@@ -396,6 +423,7 @@ fn default_region_format() -> String {
 }
 
 #[tauri::command(async)]
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 pub fn record_start_region(app: AppHandle, req: RegionReq) -> Result<(), String> {
     // 平台门槛（同 record_start）：录屏管线仅 macOS。
     #[cfg(not(target_os = "macos"))]
@@ -621,10 +649,12 @@ pub fn record_stop(app: AppHandle) -> Result<String, String> {
         rt.paused_total,
         rt.pause_started.map(|t| t.elapsed()),
     );
+    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
     let format = rt.format;
     #[cfg(target_os = "macos")]
     let gif_lane = rt.gif_lane.clone(); // Arc 克隆：lane 本体仍随 rt 存活到 stop 完成
 
+    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
     let (path, info) = {
         #[cfg(target_os = "macos")]
         {
@@ -659,6 +689,7 @@ pub fn record_stop(app: AppHandle) -> Result<String, String> {
         (path.clone(), info.width as i64, info.height as i64, duration_secs)
     };
     #[cfg(not(target_os = "macos"))]
+    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
     let (artifact, w, h, dur) = (path.clone(), 0i64, 0i64, duration_secs);
 
     // 历史入库（旁路语义：失败仅记录，不影响录制产物返回——与历史库总裁定一致）。
@@ -695,6 +726,7 @@ pub fn record_stop(app: AppHandle) -> Result<String, String> {
 
 /// 装机后立即广播首 tick（0 秒起点）：条新建分支 mount 时 pull 早于装机（record_status
 /// 返 None），推通道补上起点；条复用分支同步刷新区域标题（N1：清上一会话残留）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn emit_initial_tick(app: &AppHandle) {
     let tick = {
         let guard = lock_rec();
@@ -711,6 +743,7 @@ fn emit_initial_tick(app: &AppHandle) {
     let _ = app.emit("hawk://record-tick", tick);
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn spawn_tick_thread(app: AppHandle) {
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_secs(1));
@@ -738,6 +771,7 @@ fn spawn_tick_thread(app: AppHandle) {
 
 /// 位置裁定：主显示器顶部居中（录制条贴着屏幕上缘不遮挡内容区）；
 /// 主显示器不可得 → center() 兜底（OS 当前屏居中，零假设）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn show_recording_bar(app: &AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("recording-bar") {
         position_bar(&w);
@@ -763,6 +797,7 @@ fn show_recording_bar(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn position_bar(w: &tauri::WebviewWindow) {
     if let Some(m) = w.primary_monitor().ok().flatten() {
         let size = w.outer_size().unwrap_or(tauri::PhysicalSize::new(320, 56));

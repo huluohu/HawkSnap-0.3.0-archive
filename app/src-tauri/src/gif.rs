@@ -30,6 +30,18 @@
 //! - 超时预算：F8 = 150 帧 ≤10s；硬超时 60s 由 `ProgressReporter::increase`
 //!   返回 false 实现（gifski 原生中止路径，无泄漏线程）。
 
+// —— 非 macOS 平台放行约定（M4 P0 评审修复轮）——
+//
+// 本文件含 macOS 专属能力（录屏 / 画中画 / 贴图 / 按键显示 / 长截图 等）。非 macOS
+// 构建下这些项**无人调用**——这是「能力缺席」的正常结果，不是代码缺陷。故按项逐个
+// 放行：`#[cfg_attr(not(target_os = "macos"), allow(dead_code))]`（仅 macOS 分支才用
+// 的局部变量用 `unused_variables`，仅 macOS 才用的导入用 `unused_imports`）。
+//
+// **逐项**放行而非 crate 级 blanket allow：crate 级 `allow(dead_code, unused_*)`
+// 会把**未来新增**的同类问题一并吞掉；逐项放行后，新增项若在非 macOS 上真的无人用，
+// 依然照报。macOS 构建下这些属性恒不生效（`not(target_os = "macos")` 为假）——
+// macOS 的 lint 纪律零变化。
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -41,14 +53,17 @@ use gifski::{Repeat, Settings};
 use hawksnap_platform_mac::record::GifFrame;
 
 /// gifski 量化质量（50-100 有效区间，见模块注裁定）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const GIF_QUALITY: u8 = 90;
 
 /// 编码硬超时（F8 预算的 6 倍兜底：正常 150 帧 ≤10s，超时 = gifski 异常 → 走
 /// MP4 降级路径而不是卡死 stop）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const GIF_ENCODE_DEADLINE: Duration = Duration::from_secs(60);
 
 /// 编码产物（入库 + record_stop 返回值的数据源）。
 #[derive(Debug, Clone)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) struct GifOutcome {
     pub path: PathBuf,
     pub width: u32,
@@ -60,6 +75,7 @@ pub(crate) struct GifOutcome {
 
 /// 超时中止报告器：`increase` 越线返回 false → gifski 走原生 Aborted 中止，
 /// writer 线程退出 → Collector 通道关闭 → 投喂循环随之收尾（无孤儿线程）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 struct DeadlineReporter {
     deadline: Instant,
 }
@@ -71,6 +87,7 @@ impl ProgressReporter for DeadlineReporter {
 }
 
 /// 编码帧序列到 `out`（.gif）。帧需非空且按 PTS 升序（抽帧通道的天然产出）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn encode_gif(frames: &[GifFrame], out: &Path) -> Result<GifOutcome, String> {
     let Some(first) = frames.first() else {
         return Err("GIF 编码无帧（录制过短或抽帧失败）".into());
@@ -130,6 +147,7 @@ pub(crate) fn encode_gif(frames: &[GifFrame], out: &Path) -> Result<GifOutcome, 
 
 /// 停止收口 GIF（record_stop 的 gif 分支）：drain 旁路队列 → 编码 → .gif 落盘。
 /// 产物路径 = MP4 路径换扩展名（同秒时间戳茎）；调用方在成功后删除 MP4 中间产物。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn finish_gif_recording(
     lane: Option<&Arc<hawksnap_platform_mac::record::GifLane>>,
     mp4_path: &Path,

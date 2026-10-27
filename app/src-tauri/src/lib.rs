@@ -1,9 +1,15 @@
 // M4 P0（跨平台编译重构）：非 macOS 平台的功能面按 `cfg(target_os = "macos")`
-// 门控后，大量类型/函数/导入在桩构建下**无人使用**——这是「能力缺席」的正常
-// 结果（截图/录屏/贴图/按键显示等能力当前仅 macOS 提供），不是代码缺陷。
-// 故仅在**非 macOS** 构建下放行 dead_code / unused 告警；macOS 构建的告警
-// 纪律零变化（仍受 workspace lint 与 `cargo clippy` 约束）。
-#![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_variables, unused_imports))]
+// 门控后，个别类型/函数/导入在桩构建下**无人使用**——这是「能力缺席」的正常
+// 结果（录屏/画中画/贴图/按键显示等能力当前仅 macOS 提供），不是代码缺陷。
+//
+// 纪律（评审修复轮）：**不再用 crate 级 blanket allow**（`allow(dead_code,
+// unused_variables, unused_imports)` 会把未来的真实告警一并吞掉）。改为**逐项
+// 放行**——每一处因平台门控而无人使用的项，在其**定义处**加
+// `#[cfg_attr(not(target_os = "macos"), allow(dead_code))]`（导入类加
+// `unused_imports`），且放行范围精确到该项。
+//
+// macOS 构建的告警纪律零变化：所有 `cfg_attr` 均以 `not(target_os = "macos")`
+// 为条件，macOS 下这些 `allow` 不生效——该报 dead_code / unused 依然照报。
 
 mod bench_mode;
 mod commands;

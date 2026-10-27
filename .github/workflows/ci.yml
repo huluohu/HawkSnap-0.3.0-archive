@@ -6,8 +6,13 @@
 # av-foundation/block2/dispatch2）已全部移入
 # `[target.'cfg(target_os = "macos")'.dependencies]`，模块与平台 API 逐项
 # `#[cfg(target_os = "macos")]` 门控，非 macOS 平台提供**同名同签名**的桩
-# （明确 Err / 空值降级，绝不静默假装成功）。故 Linux / Windows 腿的
-# `cargo test --workspace` 现在是**真门**（不再 continue-on-error）。
+# （明确 Err / 空值降级，绝不静默假装成功）。
+#
+# 门禁分档（评审修复轮 I2）：
+#   - Linux（ubuntu-24.04）：**硬门**——该腿已在真实 Linux runner 上跑绿。
+#   - macOS（macos-14）：**硬门**。
+#   - Windows（windows-2022）：**首轮为非阻塞平台验证**（continue-on-error），
+#     见 matrix include 处的完整理由与**翻门条件**。
 #
 # 发布仍为 **macOS-only**：跨平台编译 ≠ 跨平台分发（Windows/Linux 的打包、
 # 签名与 updater feed 口径另案裁定，见 release job 注）。
@@ -25,6 +30,32 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-14, ubuntu-24.04, windows-2022]
+        include:
+          # —— Windows 腿：**首轮非阻塞平台验证**（continue-on-error: true）——
+          #
+          # 为什么先不设成硬门（评审修复轮 I2）：本腿**从未在 Windows runner 上真正
+          # 执行过**——M4 P0 只在 Linux 远端验证过。Windows 侧的真实未知项：
+          #   1) wry / webview2-com 在构建期需要 **WebView2 SDK**（Windows 才有），
+          #      CI 镜像是否预装未验证；
+          #   2) xcap 的 **Windows 后端是与 macOS / X11 不同的代码路径**（GDI/DXGI，
+          #      枚举与抓屏实现各异），本仓库从未在该路径上编译或运行过；
+          #   3) rusqlite **bundled** feature 需要 **MSVC 工具链**编译 SQLite；
+          #   4) 路径 / 临时目录语义与 macOS / Linux 不同（%TEMP%、反斜杠、大小写
+          #      不敏感文件系统），历史库 / 命名 / 临时文件相关断言可能行为不同。
+          # 未知项是真实的，故**首次**运行不阻塞主分支（红 = 需要人看，但不是"代码
+          # 回归"的既定事实）。
+          #
+          # ★ 翻门条件（**一次绿即翻**，别忘做）：Windows 腿 `cargo test --workspace`
+          #   **首次跑绿**（无需人工跳过 / 无需任何 continue-on-error 豁免）→
+          #   1) 删掉本 include 段的 `continue-on-error: true`；
+          #   2) 删掉 job 级 `continue-on-error: ${{ matrix.continue-on-error }}`
+          #      （或改回 false）；
+          #   3) 把本段注释与文件头注释的「Windows：首轮非阻塞」改为「Windows：硬门」；
+          #   4) 同步更新 README「平台支持」一节的 CI 门禁段落。
+          - os: windows-2022
+            continue-on-error: true
+    # 矩阵级开关：仅 Windows 腿带该键（其余腿缺失 → 表达式为假 → 硬门）。
+    continue-on-error: ${{ matrix.continue-on-error == true }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -44,10 +75,12 @@ jobs:
             libssl-dev \
             libx11-dev libxext-dev libxrandr-dev libxtst-dev \
             libxkbcommon-dev libdbus-1-dev
-      # —— 三平台真门（M4 Task P0 后）：macOS / Linux / Windows 同一条命令，
-      #    全部为硬门（无 continue-on-error）。非 macOS 平台上 macOS 专属的
-      #    截图/录屏/贴图能力按 target 门控为**桩**（明确 Err / 空值降级），
-      #    其余纯逻辑（历史库、OCR、MP4 解析、GIF 编码、状态机）照常跑测。
+      # —— 三平台同一条命令（macOS / Linux / Windows）：macOS 与 Linux 为**硬门**；
+      #    Windows 首轮为**非阻塞平台验证**（见 matrix include 的理由与翻门条件）。
+      #    非 macOS 平台上 macOS 专属的录屏/画中画/长截图/贴图/按键显示能力按 target
+      #    门控为**桩**（明确 Err / 空值降级）；**截图走跨平台 xcap 后端**（X11 /
+      #    Windows 上可能可用，未适配未实测）；其余纯逻辑（历史库、OCR、MP4 解析、
+      #    GIF 编码、状态机）照常跑测。
       - name: cargo test --workspace (macOS / Linux / Windows)
         run: cargo test --workspace
 
@@ -104,10 +137,11 @@ jobs:
   #
   # **为什么仍只跑 macOS 一条腿**（M4 Task P0 后维持）：
   #   跨平台**编译**已通（M4 P0：platform-mac 按 target 门控 + 平台桩，Linux/
-  #   Windows 的 `cargo test --workspace` 已是 CI 真门）；但跨平台**分发**是另一
-  #   件事——Windows/Linux 的打包、代码签名与 updater feed 口径（macOS-only 的
-  #   feed 里没有 win32/linux 键）尚未裁定。恢复矩阵前必须先定分发口径，
-  #   否则 publish 的 feed 与产物会对不上（make-latest 的 --platforms 门）。
+  #   macOS 的 `cargo test --workspace` 已是 CI 硬门；Windows 腿首轮为**非阻塞
+  #   平台验证**，首轮绿后翻硬门）；但跨平台**分发**是另一件事——Windows/Linux
+  #   的打包、代码签名与 updater feed 口径（macOS-only 的 feed 里没有 win32/
+  #   linux 键）尚未裁定。恢复矩阵前必须先定分发口径，否则 publish 的 feed 与
+  #   产物会对不上（make-latest 的 --platforms 门）。
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-14

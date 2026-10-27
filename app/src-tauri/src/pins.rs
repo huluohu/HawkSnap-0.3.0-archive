@@ -1,4 +1,17 @@
+// —— 非 macOS 平台放行约定（M4 P0 评审修复轮）——
+//
+// 本文件含 macOS 专属能力（录屏 / 画中画 / 贴图 / 按键显示 / 长截图 等）。非 macOS
+// 构建下这些项**无人调用**——这是「能力缺席」的正常结果，不是代码缺陷。故按项逐个
+// 放行：`#[cfg_attr(not(target_os = "macos"), allow(dead_code))]`（仅 macOS 分支才用
+// 的局部变量用 `unused_variables`，仅 macOS 才用的导入用 `unused_imports`）。
+//
+// **逐项**放行而非 crate 级 blanket allow：crate 级 `allow(dead_code, unused_*)`
+// 会把**未来新增**的同类问题一并吞掉；逐项放行后，新增项若在非 macOS 上真的无人用，
+// 依然照报。macOS 构建下这些属性恒不生效（`not(target_os = "macos")` 为假）——
+// macOS 的 lint 纪律零变化。
+
 use std::collections::HashMap;
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 use tauri::AppHandle;
@@ -15,14 +28,17 @@ use crate::commands;
 #[cfg(target_os = "macos")]
 type PinHandle = hawksnap_platform_mac::pin::PinWindow;
 #[cfg(not(target_os = "macos"))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 type PinHandle = ();
 
 #[cfg(target_os = "macos")]
 static PINS: LazyLock<Mutex<HashMap<u64, PinHandle>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 #[cfg(not(target_os = "macos"))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 static PINS: LazyLock<Mutex<HashMap<u64, PinHandle>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// 贴图 id 分配器（也作级联序号：第 n 个贴图偏移 (n%8)*24）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 static PIN_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// 进程级 AppHandle（M2 Task M3，双击进编辑器用）：双击回调是 `fn(u64)` fn 指针
@@ -37,6 +53,7 @@ static APP: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
 
 /// 级联偏移（C5 测试契约）：第 n 个贴图相对基准点（主屏中心 − 半尺寸）的对角偏移。
 /// `(n % 8) * 24`：相邻两贴图错开 24pt，8 个一循环——9+ 贴图不会级联出屏。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn next_pin_offset(n: u64) -> (f64, f64) {
     let k = (n % 8) as f64 * 24.0;
     (k, k)
@@ -44,12 +61,14 @@ pub(crate) fn next_pin_offset(n: u64) -> (f64, f64) {
 
 /// 缩放目标 clamp：当前显示比 × factor 后截到 [`hawksnap_core::geometry`] 的贴图范围
 /// （0.1..=3.2 = 10%–3200%，F3 验收口径；常量下沉后与 platform-mac 滚轮路径同一来源）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn clamp_zoom(cur: f64, factor: f64) -> f64 {
     use hawksnap_core::geometry::{PIN_ZOOM_MAX, PIN_ZOOM_MIN};
     (cur * factor).clamp(PIN_ZOOM_MIN, PIN_ZOOM_MAX)
 }
 
 /// 透明度 clamp：0.2..=1.0（20%–100%，F3 验收口径；常量单一来源同上）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn clamp_opacity(opacity: f64) -> f64 {
     use hawksnap_core::geometry::{PIN_OPACITY_MAX, PIN_OPACITY_MIN};
     opacity.clamp(PIN_OPACITY_MIN, PIN_OPACITY_MAX)
@@ -63,9 +82,11 @@ pub(crate) fn clamp_opacity(opacity: f64) -> f64 {
 /// 比例保持）再建窗；贴图语义（参考/对照）下 4096 长边的信息量足够，滚轮缩放
 /// （F3，0.1–3.2×）不受影响——缩放是显示比，不重建位图。降采样失败（理论不可达：
 /// RGBA 尺寸合法）→ 原样放行，由建窗路径自有兜底。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const PIN_MAX_EDGE_PX: u32 = 4096;
 
 /// 尺寸上限裁剪（纯函数可测）：长边 ≤ 上限原样返回；> 上限降采样并返回新尺寸。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn cap_pin_rgba(
     rgba: std::sync::Arc<Vec<u8>>,
     w: u32,
@@ -85,6 +106,7 @@ fn cap_pin_rgba(
 }
 
 /// pin 图像来源（C5）：CAPTURES 最近一轮非空整帧，或剪贴板图像（scale=1.0）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 struct PinSource {
     /// 来源标签（探针/E2E 判别用）："captures" | "clipboard"。
     source: &'static str,
@@ -97,6 +119,7 @@ struct PinSource {
 /// 来源顺序（plan C5）：① CAPTURES 最后一轮的 rgba（未释放时——release_captures 后为
 /// 空 Arc，跳过）；② arboard 剪贴板图像（用户刚复制的任意图像）。两者皆无 → Err
 /// 「剪贴板没有图像且无最近截图」。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn resolve_source() -> Result<PinSource, String> {
     if let Some(c) = commands::latest_capture_rgba() {
         return Ok(PinSource { source: "captures", rgba: c.rgba, w_px: c.w_px, h_px: c.h_px, scale: c.scale });
@@ -196,6 +219,7 @@ fn spawn_pin_window(
 /// 主显示器中心（全局逻辑坐标，左上原点）：captured_display_frames 里含原点 (0,0) 的
 /// 帧视为主显示器（xcap/CGDisplayBounds 与 NSScreen 同一原点口径），否则取第一个；
 /// 全空（未捕获过）→ (756.0, 491.0)（1512×982 逻辑分辨率的一半，主流 Mac 回退值）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn primary_display_center() -> (f64, f64) {
     let frames = commands::captured_display_frames();
     let f = frames
