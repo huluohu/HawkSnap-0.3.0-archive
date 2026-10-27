@@ -1,7 +1,0 @@
-name: minimal-probe
-on: push
-jobs:
-  hi:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo hi
