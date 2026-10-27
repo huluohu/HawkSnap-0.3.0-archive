@@ -201,8 +201,6 @@ jobs:
       - name: Configure Pages
         if: steps.gate.outputs.changed != 'false'
         uses: actions/configure-pages@v5
-        with:
-          enablement: true
       - name: Upload site artifact
         if: steps.gate.outputs.changed != 'false'
         uses: actions/upload-pages-artifact@v3
